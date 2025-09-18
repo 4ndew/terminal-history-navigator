@@ -10,11 +10,11 @@ import (
 // Styles
 var (
 	// Colors
-	primaryColor   = lipgloss.Color("#00D4AA")
-	secondaryColor = lipgloss.Color("#7C3AED")
-	accentColor    = lipgloss.Color("#F59E0B")
-	mutedColor     = lipgloss.Color("#6B7280")
-	errorColor     = lipgloss.Color("#EF4444")
+	primaryColor = lipgloss.Color("#00D4AA")
+	accentColor  = lipgloss.Color("#F59E0B")
+	mutedColor   = lipgloss.Color("#6B7280")
+	errorColor   = lipgloss.Color("#EF4444")
+	successColor = lipgloss.Color("#10B981")
 
 	// Base styles
 	baseStyle = lipgloss.NewStyle().
@@ -139,8 +139,23 @@ func (m Model) renderMainContent() string {
 	for i := start; i < end; i++ {
 		item := items[i]
 
-		// Truncate long items
-		maxWidth := m.width - 8
+		// Add status indicator for commands with exit codes
+		statusIndicator := ""
+		if m.mode == HistoryMode || m.mode == SearchMode {
+			if i < len(m.filteredCmds) {
+				cmd := m.filteredCmds[i]
+				if cmd.HasExit {
+					if cmd.ExitCode == 0 {
+						statusIndicator = lipgloss.NewStyle().Foreground(successColor).Render("✓ ")
+					} else {
+						statusIndicator = lipgloss.NewStyle().Foreground(errorColor).Render("✗ ")
+					}
+				}
+			}
+		}
+
+		// Truncate long items (account for status indicator)
+		maxWidth := m.width - 12
 		if maxWidth < 20 {
 			maxWidth = 20
 		}
@@ -151,9 +166,9 @@ func (m Model) renderMainContent() string {
 		// Apply styling based on selection
 		var styledItem string
 		if i == selectedIndex {
-			styledItem = selectedItemStyle.Render("► " + item)
+			styledItem = selectedItemStyle.Render("► " + statusIndicator + item)
 		} else {
-			styledItem = normalItemStyle.Render("  " + item)
+			styledItem = normalItemStyle.Render("  " + statusIndicator + item)
 		}
 
 		renderedItems = append(renderedItems, styledItem)
@@ -193,14 +208,25 @@ func (m Model) renderFooter() string {
 		sections = append(sections, statusStyle.Render(m.statusMsg))
 	}
 
-	// Item count and position
+	// Item count and position info
 	itemCount := m.getItemCount()
 	if itemCount > 0 {
 		position := fmt.Sprintf("%d/%d", m.cursor+1, itemCount)
-		sections = append(sections, lipgloss.NewStyle().Foreground(mutedColor).Render(position))
+
+		// Add sorting info
+		var sortInfo string
+		if m.mode == HistoryMode {
+			if m.statusMsg == "Sorted by frequency" {
+				sortInfo = " (by frequency)"
+			} else {
+				sortInfo = " (newest first)"
+			}
+		}
+
+		sections = append(sections, lipgloss.NewStyle().Foreground(mutedColor).Render(position+sortInfo))
 	}
 
-	// Controls help
+	// Controls help (can be multi-line now)
 	controls := m.getControlsHelp()
 	sections = append(sections, footerStyle.Render(controls))
 
@@ -213,9 +239,12 @@ func (m Model) getControlsHelp() string {
 	case SearchMode:
 		return "esc: exit search | enter: select | ↑↓: navigate"
 	case TemplatesMode:
-		return "enter: copy | t: history | /: search | ?: help | q: quit"
+		return "enter: copy | e: edit | t: history | /: search\n?: help | q: quit"
 	default:
-		return "enter: copy | t: templates | /: search | f: frequency | ?: help | q: quit"
+		// Split history mode controls into two lines
+		line1 := "enter: copy | t: templates | /: search | f: frequency"
+		line2 := "s: successful | x: failed | r: refresh | ?: help | q: quit"
+		return line1 + "\n" + line2
 	}
 }
 
@@ -234,6 +263,7 @@ MODES:
   /           Start search
   f           Sort by frequency (history mode)
   r           Refresh data
+  e           Edit templates (templates mode)
   
 SEARCH:
   /           Enter search mode
