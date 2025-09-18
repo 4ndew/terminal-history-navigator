@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+
 	"github.com/4ndew/terminal-history-navigator/internal/config"
 	"github.com/4ndew/terminal-history-navigator/internal/history"
 	"github.com/4ndew/terminal-history-navigator/internal/storage"
@@ -191,7 +193,12 @@ func (m *Model) getVisibleItems() ([]string, int) {
 	switch m.mode {
 	case HistoryMode, SearchMode:
 		for _, cmd := range m.filteredCmds {
-			items = append(items, cmd.Text)
+			item := cmd.Text
+			// Show frequency count if sorted by frequency and count > 1
+			if m.statusMsg == "Sorted by frequency" && cmd.Count > 1 {
+				item = fmt.Sprintf("[%dx] %s", cmd.Count, cmd.Text)
+			}
+			items = append(items, item)
 		}
 		selectedIndex = m.cursor
 

@@ -2,7 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 
+	"github.com/4ndew/terminal-history-navigator/internal/history"
 	"github.com/4ndew/terminal-history-navigator/pkg/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -71,11 +74,23 @@ func (m Model) handleNormalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "f":
-		// Switch to frequency mode
+		// Toggle between frequency and chronological sort
 		if m.mode == HistoryMode {
-			m.filteredCmds = m.storage.GetByFrequency()
-			m.cursor = 0
-			m.setStatus("Sorted by frequency")
+			if m.statusMsg == "Sorted by frequency" {
+				// Switch back to chronological
+				m.filteredCmds = m.storage.GetRecent(m.config.UI.MaxItems)
+				m.cursor = 0
+				m.setStatus("Sorted chronologically (newest first)")
+			} else {
+				// Switch to frequency
+				freqCmds := m.storage.GetByFrequency()
+				if len(freqCmds) > m.config.UI.MaxItems {
+					freqCmds = freqCmds[:m.config.UI.MaxItems]
+				}
+				m.filteredCmds = freqCmds
+				m.cursor = 0
+				m.setStatus("Sorted by frequency")
+			}
 		}
 		return m, nil
 
@@ -83,9 +98,48 @@ func (m Model) handleNormalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = !m.showHelp
 		return m, nil
 
+	case "e":
+		// Edit templates (only in templates mode)
+		if m.mode == TemplatesMode {
+			return m.handleEditTemplates()
+		}
+		return m, nil
+
 	case "esc":
 		m.clearMessages()
 		m.showHelp = false
+		return m, nil
+
+	case "s":
+		// Show only successful commands (exit code 0)
+		if m.mode == HistoryMode {
+			allCommands := m.storage.GetRecent(m.config.UI.MaxItems)
+			var successfulCmds []history.Command
+			for _, cmd := range allCommands {
+				if !cmd.HasExit || cmd.ExitCode == 0 {
+					successfulCmds = append(successfulCmds, cmd)
+				}
+			}
+			m.filteredCmds = successfulCmds
+			m.cursor = 0
+			m.setStatus("Showing only successful commands")
+		}
+		return m, nil
+
+	case "x":
+		// Show only failed commands (exit code != 0)
+		if m.mode == HistoryMode {
+			allCommands := m.storage.GetRecent(m.config.UI.MaxItems)
+			var failedCmds []history.Command
+			for _, cmd := range allCommands {
+				if cmd.HasExit && cmd.ExitCode != 0 {
+					failedCmds = append(failedCmds, cmd)
+				}
+			}
+			m.filteredCmds = failedCmds
+			m.cursor = 0
+			m.setStatus("Showing only failed commands")
+		}
 		return m, nil
 	}
 
@@ -157,4 +211,42 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// handleEditTemplates opens the templates file in an editor
+func (m Model) handleEditTemplates() (tea.Model, tea.Cmd) {
+	// Get templates file path from config
+	templatesPath := m.config.TemplatesPath
+
+	// Try to open in default editor
+	editors := []string{
+		os.Getenv("EDITOR"),
+		"nano",
+		"vim",
+		"code",
+		"open", // macOS default
+	}
+
+	for _, editor := range editors {
+		if editor == "" {
+			continue
+		}
+
+		// For "open" on macOS, use -t flag for text editor
+		var cmd *exec.Cmd
+		if editor == "open" {
+			cmd = exec.Command("open", "-t", templatesPath)
+		} else {
+			cmd = exec.Command(editor, templatesPath)
+		}
+
+		if err := cmd.Start(); err == nil {
+			m.setStatus("Opening templates in " + editor + ". Restart app to see changes.")
+			return m, nil
+		}
+	}
+
+	// If no editor worked, show path
+	m.setStatus("Edit templates: " + templatesPath)
+	return m, nil
 }

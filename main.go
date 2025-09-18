@@ -25,6 +25,16 @@ func main() {
 
 	// Read command history
 	reader := history.NewReader(cfg.Sources)
+	reader.SetMaxLines(cfg.Performance.MaxHistoryLines)
+
+	// Set exclude patterns if any configured
+	if len(cfg.ExcludePatterns) > 0 {
+		err = reader.SetExcludePatterns(cfg.ExcludePatterns)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Invalid exclude patterns: %v\n", err)
+		}
+	}
+
 	commands, err := reader.ReadHistory()
 	if err != nil {
 		log.Fatalf("Failed to read history: %v", err)
