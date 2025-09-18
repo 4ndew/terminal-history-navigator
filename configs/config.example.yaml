@@ -1,0 +1,32 @@
+# History Navigator Configuration
+
+# History file sources
+sources:
+  - ~/.zsh_history
+  - ~/.bash_history
+
+# Patterns to exclude from history (regex)
+exclude_patterns:
+  - "^sudo "
+  - "password"
+  - "token"
+  - "secret"
+  - "key"
+  - "^history"
+  - "^exit"
+  - "^clear"
+
+# UI settings
+ui:
+  max_items: 1000
+  theme: "dark"
+  show_timestamps: true
+  show_frequency: true
+
+# Templates file path
+templates_path: "~/.config/history-nav/templates.yaml"
+
+# Performance settings
+performance:
+  cache_enabled: true
+  max_history_lines: 10000
