@@ -1,0 +1,61 @@
+# Command Templates
+
+templates:
+  # Git commands
+  - name: "Git status"
+    command: "git status"
+    description: "Show working tree status"
+    category: "git"
+    
+  - name: "Git log oneline"
+    command: "git log --oneline -10"
+    description: "Show last 10 commits in one line"
+    category: "git"
+    
+  - name: "Git branch"
+    command: "git branch -a"
+    description: "List all branches"
+    category: "git"
+
+  # Docker commands  
+  - name: "Docker ps"
+    command: "docker ps -a"
+    description: "List all containers"
+    category: "docker"
+    
+  - name: "Docker images"
+    command: "docker images"
+    description: "List all images"
+    category: "docker"
+    
+  - name: "Docker logs"
+    command: "docker logs -f"
+    description: "Follow container logs"
+    category: "docker"
+
+  # System commands
+  - name: "Disk usage"
+    command: "df -h"
+    description: "Show disk space usage"
+    category: "system"
+    
+  - name: "Memory usage"
+    command: "free -h"
+    description: "Show memory usage"
+    category: "system"
+    
+  - name: "Process tree"
+    command: "pstree"
+    description: "Display running processes as tree"
+    category: "system"
+    
+  # Network commands
+  - name: "Network connections"
+    command: "netstat -tulpn"
+    description: "Show network connections"
+    category: "network"
+    
+  - name: "Ping test"
+    command: "ping -c 4 google.com"
+    description: "Test network connectivity"
+    category: "network"
