@@ -7,23 +7,20 @@ sources:
 
 # Patterns to exclude from history (regex)
 exclude_patterns:
-  - "^sudo "
+  - "^sudo su"          # sudo su commands (but not all sudo)  
   - "password"
   - "token"
   - "secret"
-  - "key"
+  - "key.*="           # environment variables with keys
   - "^history"
   - "^exit$"
   - "^clear$"
-  - "^ls$"
-  - "^ll$"
-  - "^cd$"
   - "^pwd$"
-  - "^\.$"
-  - "^\.\.+$"
-  - "^\d+$"              # Just numbers
+  - "^\\.$"
+  - "^\\.\\.+$"
+  - "^\\d+$"              # Just numbers
   - "^[[:space:]]*$"     # Just whitespace
-  - "^h$"                # Single 'h' command
+  - "h$"
 
 # UI settings
 ui:

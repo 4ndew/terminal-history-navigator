@@ -23,8 +23,7 @@ var (
 	// Header styles
 	headerStyle = lipgloss.NewStyle().
 			Foreground(primaryColor).
-			Bold(true).
-			Padding(0, 1)
+			Bold(true)
 
 	// Item styles
 	selectedItemStyle = lipgloss.NewStyle().
@@ -33,8 +32,7 @@ var (
 				Padding(0, 1)
 
 	normalItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#E5E7EB")).
-			Padding(0, 1)
+			Foreground(lipgloss.Color("#E5E7EB"))
 
 	// Footer styles
 	footerStyle = lipgloss.NewStyle().
@@ -70,16 +68,18 @@ func (m Model) View() string {
 
 	var sections []string
 
-	// Header
+	// Header - always show
 	sections = append(sections, m.renderHeader())
+	sections = append(sections, "") // Empty line for separation
 
 	// Main content
 	sections = append(sections, m.renderMainContent())
 
 	// Footer
+	sections = append(sections, "") // Empty line before footer
 	sections = append(sections, m.renderFooter())
 
-	return baseStyle.Render(strings.Join(sections, "\n"))
+	return strings.Join(sections, "\n")
 }
 
 // renderHeader renders the application header
@@ -110,21 +110,29 @@ func (m Model) renderMainContent() string {
 
 	var renderedItems []string
 
-	// Calculate visible range (simple scrolling)
-	maxVisible := m.height - 6 // Account for header, footer, padding
-	if maxVisible < 1 {
-		maxVisible = 10
+	// Calculate visible range with proper scrolling
+	maxVisible := m.height - 6 // Account for header, separators, footer
+	if maxVisible < 5 {
+		maxVisible = 5
 	}
 
 	start := 0
 	end := len(items)
 
-	// If there are more items than can fit, center the selection
+	// If we have more items than can fit, calculate scroll window
 	if len(items) > maxVisible {
-		start = selectedIndex - maxVisible/2
-		if start < 0 {
+		// Simple scrolling logic: keep selected item in view
+		if selectedIndex < maxVisible {
+			// If selection is in the first screen, start from 0
 			start = 0
+		} else {
+			// Otherwise, scroll to show selected item
+			start = selectedIndex - maxVisible + 1
+			if start < 0 {
+				start = 0
+			}
 		}
+
 		end = start + maxVisible
 		if end > len(items) {
 			end = len(items)
@@ -138,6 +146,7 @@ func (m Model) renderMainContent() string {
 	// Render visible items
 	for i := start; i < end; i++ {
 		item := items[i]
+		isSelected := (i == selectedIndex)
 
 		// Add status indicator for commands with exit codes
 		statusIndicator := ""
@@ -154,64 +163,71 @@ func (m Model) renderMainContent() string {
 			}
 		}
 
-		// Wrap long items and apply styling
-		wrappedItem := m.wrapAndStyleItem(item, statusIndicator, i == selectedIndex)
-		renderedItems = append(renderedItems, wrappedItem)
+		// Render item
+		renderedItem := m.renderSingleItem(item, statusIndicator, isSelected)
+		renderedItems = append(renderedItems, renderedItem)
 	}
 
 	return strings.Join(renderedItems, "\n")
 }
 
-// wrapAndStyleItem wraps long text and applies styling
-func (m Model) wrapAndStyleItem(item string, statusIndicator string, isSelected bool) string {
-	// Calculate available width for text (account for indicators and padding)
-	maxWidth := m.width - 12 // Account for status indicators, selection markers, padding
+// renderSingleItem renders a single item with proper wrapping
+func (m Model) renderSingleItem(item string, statusIndicator string, isSelected bool) string {
+	// Calculate available width
+	maxWidth := m.width - 6 // Account for selection markers and padding
 	if maxWidth < 20 {
 		maxWidth = 20
 	}
 
-	// If item fits in one line, render normally
-	if len(item) <= maxWidth {
+	// Prepare the full text with status indicator
+	fullText := statusIndicator + item
+
+	var prefix string
+	if isSelected {
+		prefix = "► "
+	} else {
+		prefix = "  "
+	}
+
+	// If it fits in one line
+	if len(prefix+fullText) <= maxWidth {
 		var styledItem string
 		if isSelected {
-			styledItem = selectedItemStyle.Render("► " + statusIndicator + item)
+			styledItem = selectedItemStyle.Render(prefix + fullText)
 		} else {
-			styledItem = normalItemStyle.Render("  " + statusIndicator + item)
+			styledItem = normalItemStyle.Render(prefix + fullText)
 		}
 		return styledItem
 	}
 
-	// Item is too long - wrap it
-	lines := wrapText(item, maxWidth)
+	// Need to wrap
+	availableForText := maxWidth - len(prefix) - len(statusIndicator)
+	if availableForText < 10 {
+		availableForText = 10
+	}
+
+	lines := wrapText(item, availableForText)
 	var wrappedLines []string
 
 	for j, line := range lines {
-		var prefix string
+		var linePrefix string
 		var indicator string
 
 		if j == 0 {
-			// First line - normal selection marker and status
-			if isSelected {
-				prefix = "► "
-			} else {
-				prefix = "  "
-			}
+			// First line gets the selection marker and status
+			linePrefix = prefix
 			indicator = statusIndicator
 		} else {
-			// Continuation lines - indent
-			if isSelected {
-				prefix = "  "
-			} else {
-				prefix = "  "
-			}
-			indicator = "  " // Same width as statusIndicator for alignment
+			// Continuation lines get padding
+			linePrefix = "  "
+			indicator = strings.Repeat(" ", len(statusIndicator))
 		}
 
 		var styledLine string
 		if isSelected {
-			styledLine = selectedItemStyle.Render(prefix + indicator + line)
+			styledLine = selectedItemStyle.Render(linePrefix + indicator + line)
 		} else {
-			styledLine = normalItemStyle.Render(prefix + indicator + line)
+			styledLine = normalItemStyle.Render(linePrefix + indicator + line)
 		}
 		wrappedLines = append(wrappedLines, styledLine)
 	}
@@ -219,37 +235,34 @@ func (m Model) wrapAndStyleItem(item string, statusIndicator string, isSelected 
 	return strings.Join(wrappedLines, "\n")
 }
 
-// wrapText wraps text to specified width, preserving word boundaries where possible
+// wrapText wraps text to specified width
 func wrapText(text string, width int) []string {
 	if len(text) <= width {
 		return []string{text}
 	}
 
 	var lines []string
+	remaining := text
 
-	for len(text) > 0 {
-		if len(text) <= width {
-			lines = append(lines, text)
+	for len(remaining) > 0 {
+		if len(remaining) <= width {
+			lines = append(lines, remaining)
 			break
 		}
 
-		// Find the best break point
+		// Find best break point
 		breakPoint := width
-
-		// Try to break at a space
-		for i := width - 1; i >= width/2; i-- {
-			if i < len(text) && text[i] == ' ' {
+		for i := width - 1; i >= width/2 && i > 0; i-- {
+			if i < len(remaining) && remaining[i] == ' ' {
 				breakPoint = i
 				break
 			}
 		}
 
-		// Take the line
-		line := strings.TrimSpace(text[:breakPoint])
+		// Take the line and continue
+		line := strings.TrimSpace(remaining[:breakPoint])
 		lines = append(lines, line)
-
-		// Continue with the rest
-		text = strings.TrimSpace(text[breakPoint:])
+		remaining = strings.TrimSpace(remaining[breakPoint:])
 	}
 
 	return lines
@@ -308,19 +321,60 @@ func (m Model) renderFooter() string {
 	controls := m.getControlsHelp()
 	sections = append(sections, footerStyle.Render(controls))
 
-	return strings.Join(sections, " | ")
+	// Join sections and wrap if necessary
+	footer := strings.Join(sections, " | ")
+	return m.wrapFooter(footer)
+}
+
+// wrapFooter wraps the footer text if it exceeds screen width
+func (m Model) wrapFooter(footer string) string {
+	maxWidth := m.width - 4
+	if maxWidth < 20 {
+		maxWidth = 20
+	}
+
+	if len(footer) <= maxWidth {
+		return footer
+	}
+
+	// Split and wrap footer
+	parts := strings.Split(footer, " | ")
+	var lines []string
+	var currentLine string
+
+	for i, part := range parts {
+		testLine := currentLine
+		if testLine != "" {
+			testLine += " | "
+		}
+		testLine += part
+
+		if len(testLine) <= maxWidth {
+			currentLine = testLine
+		} else {
+			if currentLine != "" {
+				lines = append(lines, currentLine)
+			}
+			currentLine = part
+		}
+
+		if i == len(parts)-1 && currentLine != "" {
+			lines = append(lines, currentLine)
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // getControlsHelp returns context-appropriate control hints
 func (m Model) getControlsHelp() string {
 	switch m.mode {
 	case SearchMode:
-		return "esc: exit search | enter: select | ↑↓: navigate"
+		return "esc: exit | enter: copy | ↑↓: navigate"
 	case TemplatesMode:
 		return "enter: copy | t: history | /: search | ?: help | q: quit"
 	default:
-		// History mode controls
-		return "enter: copy | t: templates | /: search | f: frequency | r: refresh | ?: help | q: quit"
+		return "enter: copy | t: templates | /: search | f: frequency | ?: help | q: quit"
 	}
 }
 
@@ -338,7 +392,6 @@ MODES:
   t           Toggle templates mode
   /           Start search
   f           Sort by frequency (history mode)
-  r           Refresh data from source files
   
 SEARCH:
   /           Enter search mode

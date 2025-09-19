@@ -23,6 +23,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleKeyPress processes keyboard input
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle help mode separately - any key closes help
+	if m.showHelp {
+		switch msg.String() {
+		case "ctrl+c", "q":
+			return m, tea.Quit
+		default:
+			// Any other key closes help
+			m.showHelp = false
+			return m, nil
+		}
+	}
+
 	switch m.mode {
 	case SearchMode:
 		return m.handleSearchKeys(msg)
@@ -62,16 +74,6 @@ func (m Model) handleNormalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "h":
 		m.switchToHistoryMode()
-		return m, nil
-
-	case "r":
-		// Refresh commands from source files
-		err := m.refreshAllData()
-		if err != nil {
-			m.setError(fmt.Sprintf("Refresh failed: %v", err))
-		} else {
-			m.setStatus("Refreshed from source files")
-		}
 		return m, nil
 
 	case "f":

@@ -40,23 +40,20 @@ func DefaultConfig() *Config {
 			filepath.Join(homeDir, ".bash_history"),
 		},
 		ExcludePatterns: []string{
-			"^sudo ",
+			"^sudo su", // Only sudo su commands (not all sudo)
 			"password",
 			"token",
 			"secret",
-			"key",
+			"key.*=", // Only environment variables with keys
 			"^history",
 			"^exit$",
 			"^clear$",
-			"^ls$",
-			"^ll$",
-			"^cd$",
 			"^pwd$",
 			"^\\.$",
 			"^\\.\\.*$",
 			"^\\d+$",         // Just numbers
 			"^[[:space:]]*$", // Just whitespace
-			"^h$",            // Single 'h' command
+			"^h$",
 		},
 		UI: UIConfig{
 			MaxItems:       1000,

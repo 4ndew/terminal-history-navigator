@@ -49,13 +49,8 @@ func main() {
 		// Continue without templates
 	}
 
-	// Create refresh callback
-	refreshData := func() error {
-		return loadHistory(reader, store)
-	}
-
-	// Create UI model with refresh callback
-	model := ui.NewModel(store, templatesData, cfg, refreshData)
+	// Create UI model
+	model := ui.NewModel(store, templatesData, cfg)
 
 	// Create TUI program
 	program := tea.NewProgram(

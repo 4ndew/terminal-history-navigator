@@ -43,39 +43,31 @@ func (s *MemoryStorage) Search(query string) []history.Command {
 	}
 
 	query = strings.ToLower(query)
-	matchingIndices := make(map[int]bool)
-
-	// Split query into words
 	queryWords := strings.Fields(query)
 
-	for _, word := range queryWords {
-		if indices, found := s.indexed[word]; found {
-			for _, idx := range indices {
-				matchingIndices[idx] = true
+	// Find commands that contain ALL query words (AND logic)
+	var results []history.Command
+
+	for _, cmd := range s.commands {
+		cmdText := strings.ToLower(cmd.Text)
+		matchesAll := true
+
+		// Check if command contains ALL query words
+		for _, word := range queryWords {
+			if !strings.Contains(cmdText, word) {
+				matchesAll = false
+				break
 			}
-		} else {
-			// Fallback to substring search if word not in index
-			for i, cmd := range s.commands {
-				if strings.Contains(strings.ToLower(cmd.Text), word) {
-					matchingIndices[i] = true
-				}
-			}
+		}
+
+		if matchesAll {
+			results = append(results, cmd)
 		}
 	}
 
-	// Collect matching commands
-	results := make([]history.Command, 0, len(matchingIndices))
-	for idx := range matchingIndices {
-		results = append(results, s.commands[idx])
-	}
-
-	// Sort by relevance (frequency and recency)
+	// Sort by recency first (newest first), then by frequency
 	sort.Slice(results, func(i, j int) bool {
-		// Primary sort by frequency
-		if results[i].Count != results[j].Count {
-			return results[i].Count > results[j].Count
-		}
-		// Secondary sort by timestamp
+		// Primary sort by timestamp (newest first)
 		return results[i].Timestamp.After(results[j].Timestamp)
 	})
 
@@ -87,17 +79,65 @@ func (s *MemoryStorage) GetByFrequency() []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
 
+	// Filter commands with count > 1 to show only frequently used ones
+	var frequentCommands []history.Command
+	for _, cmd := range commands {
+		if cmd.Count > 1 {
+			frequentCommands = append(frequentCommands, cmd)
+		}
+	}
+
+	// If no frequent commands, fallback to all commands sorted by simulated frequency
+	if len(frequentCommands) == 0 {
+		// Simulate frequency based on command characteristics
+		for i := range commands {
+			commands[i].Count = s.calculateSimulatedFrequency(commands[i])
+		}
+		frequentCommands = commands
+	}
+
 	// Sort by frequency (count) first, then by recency
-	sort.Slice(commands, func(i, j int) bool {
+	sort.Slice(frequentCommands, func(i, j int) bool {
 		// Primary sort by count (frequency) - higher count first
-		if commands[i].Count != commands[j].Count {
-			return commands[i].Count > commands[j].Count
+		if frequentCommands[i].Count != frequentCommands[j].Count {
+			return frequentCommands[i].Count > frequentCommands[j].Count
 		}
 		// Secondary sort by timestamp - more recent first
-		return commands[i].Timestamp.After(commands[j].Timestamp)
+		return frequentCommands[i].Timestamp.After(frequentCommands[j].Timestamp)
 	})
 
-	return commands
+	return frequentCommands
+}
+
+// calculateSimulatedFrequency simulates frequency based on command patterns
+func (s *MemoryStorage) calculateSimulatedFrequency(cmd history.Command) int {
+	// Base frequency
+	freq := 1
+
+	// Boost common development commands
+	commonPatterns := []string{
+		"git", "make", "npm", "yarn", "docker", "cd", "ls", "vim", "code",
+		"python", "node", "go", "cargo", "mvn", "gradle", "pip", "brew",
+	}
+
+	for _, pattern := range commonPatterns {
+		if strings.Contains(strings.ToLower(cmd.Text), pattern) {
+			freq += 2
+			break
+		}
+	}
+
+	// Boost short, likely-repeated commands
+	if len(cmd.Text) < 10 {
+		freq += 1
+	}
+
+	// Commands that don't have parameters are likely used more often
+	if !strings.Contains(cmd.Text, " ") {
+		freq += 1
+	}
+
+	return freq
 }
 
 // GetRecent returns the most recently used commands
