@@ -8,13 +8,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Command represents a shell command with metadata
 type Command struct {
 	Text      string
-	Timestamp time.Time
+	Position  int // Position in history file (higher = newer)
 	Directory string
 	Count     int
 	ExitCode  int  // Exit code if available
@@ -77,9 +76,9 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 	// Filter out problematic commands before sorting
 	allCommands = r.filterProblematicCommands(allCommands)
 
-	// Sort all commands by timestamp (newest first)
+	// Sort all commands by position (newest first - higher position = newer)
 	sort.Slice(allCommands, func(i, j int) bool {
-		return allCommands[i].Timestamp.After(allCommands[j].Timestamp)
+		return allCommands[i].Position > allCommands[j].Position
 	})
 
 	// Deduplicate and count frequency
@@ -99,10 +98,10 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 		}
 
 		if existing, found := commandMap[cleanText]; found {
-			// Increment count and keep most recent timestamp
+			// Increment count and keep highest position (most recent appearance)
 			existing.Count++
-			if cmd.Timestamp.After(existing.Timestamp) {
-				existing.Timestamp = cmd.Timestamp
+			if cmd.Position > existing.Position {
+				existing.Position = cmd.Position
 				existing.ExitCode = cmd.ExitCode
 				existing.HasExit = cmd.HasExit
 			}
@@ -116,9 +115,9 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 		}
 	}
 
-	// Re-sort result by timestamp after deduplication
+	// Re-sort result by position after deduplication (newest first)
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].Timestamp.After(result[j].Timestamp)
+		return result[i].Position > result[j].Position
 	})
 
 	return result, nil
@@ -128,12 +127,9 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 func (r *Reader) filterProblematicCommands(commands []Command) []Command {
 	var filtered []Command
 
-	now := time.Now()
-	fiveYearsAgo := now.AddDate(-5, 0, 0)
-
 	for _, cmd := range commands {
 		// Skip commands that are clearly problematic
-		if r.isProblematicCommand(cmd, now, fiveYearsAgo) {
+		if r.isProblematicCommand(cmd) {
 			continue
 		}
 		filtered = append(filtered, cmd)
@@ -143,17 +139,7 @@ func (r *Reader) filterProblematicCommands(commands []Command) []Command {
 }
 
 // isProblematicCommand checks if a command should be filtered out
-func (r *Reader) isProblematicCommand(cmd Command, now, fiveYearsAgo time.Time) bool {
-	// Filter out commands with future timestamps
-	if cmd.Timestamp.After(now.Add(time.Hour)) {
-		return true
-	}
-
-	// Filter out very old commands (likely parsing errors)
-	if cmd.Timestamp.Before(fiveYearsAgo) {
-		return true
-	}
-
+func (r *Reader) isProblematicCommand(cmd Command) bool {
 	// Filter out empty commands
 	cleanText := strings.TrimSpace(cmd.Text)
 	if len(cleanText) == 0 {
@@ -225,8 +211,8 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 			cmd = r.parseZshLine(line, i)
 		case strings.Contains(filename, "bash") || filepath.Ext(filename) == ".bash_history":
 			cmd = Command{
-				Text:      strings.TrimSpace(line),
-				Timestamp: time.Now().Add(-time.Duration(len(commands)) * time.Second),
+				Text:     strings.TrimSpace(line),
+				Position: i, // Position in file
 			}
 		default:
 			// Try zsh format first, then fallback
@@ -234,8 +220,8 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 				cmd = r.parseZshLine(line, i)
 			} else {
 				cmd = Command{
-					Text:      strings.TrimSpace(line),
-					Timestamp: time.Now().Add(-time.Duration(len(commands)) * time.Second),
+					Text:     strings.TrimSpace(line),
+					Position: i, // Position in file
 				}
 			}
 		}
@@ -256,11 +242,11 @@ func (r *Reader) parseZshLine(line string, lineNum int) Command {
 	if !strings.HasPrefix(line, ":") {
 		if line != "" {
 			return Command{
-				Text:      line,
-				Timestamp: time.Now().Add(-time.Duration(lineNum) * time.Second),
+				Text:     line,
+				Position: lineNum, // Position in file
 			}
 		}
-		return Command{Text: "", Timestamp: time.Now()}
+		return Command{Text: "", Position: lineNum}
 	}
 
 	// Extended zsh format: : timestamp:duration;command
@@ -271,32 +257,21 @@ func (r *Reader) parseZshLine(line string, lineNum int) Command {
 			possibleCmd := strings.TrimSpace(line[1:])
 			if possibleCmd != "" && !strings.Contains(possibleCmd, ":") {
 				return Command{
-					Text:      possibleCmd,
-					Timestamp: time.Now().Add(-time.Duration(lineNum) * time.Second),
+					Text:     possibleCmd,
+					Position: lineNum,
 				}
 			}
 		}
-		return Command{Text: "", Timestamp: time.Now()}
+		return Command{Text: "", Position: lineNum}
 	}
 
 	// Extract metadata
 	metadataPart := line[1:semiIndex]
-	var timestamp time.Time
 	var exitCode int
 	var hasExit bool
 
 	parts := strings.Split(metadataPart, ":")
-	if len(parts) >= 1 && parts[0] != "" {
-		if ts, err := parseTimestamp(parts[0]); err == nil {
-			timestamp = ts
-		} else {
-			timestamp = time.Now().Add(-time.Duration(lineNum) * time.Second)
-		}
-	} else {
-		timestamp = time.Now().Add(-time.Duration(lineNum) * time.Second)
-	}
-
-	// Check for exit code
+	// Check for exit code (third part in format timestamp:duration:exitcode)
 	if len(parts) >= 3 && parts[2] != "" {
 		if code, err := strconv.Atoi(parts[2]); err == nil {
 			exitCode = code
@@ -308,10 +283,10 @@ func (r *Reader) parseZshLine(line string, lineNum int) Command {
 	command := strings.TrimSpace(line[semiIndex+1:])
 
 	return Command{
-		Text:      command,
-		Timestamp: timestamp,
-		ExitCode:  exitCode,
-		HasExit:   hasExit,
+		Text:     command,
+		Position: lineNum, // Position in file
+		ExitCode: exitCode,
+		HasExit:  hasExit,
 	}
 }
 
@@ -323,18 +298,4 @@ func (r *Reader) shouldExclude(command string) bool {
 		}
 	}
 	return false
-}
-
-// parseTimestamp parses a Unix timestamp string
-func parseTimestamp(timestampStr string) (time.Time, error) {
-	if len(timestampStr) >= 10 {
-		timestampStr = timestampStr[:10]
-		if timestamp, err := strconv.ParseInt(timestampStr, 10, 64); err == nil {
-			// Validate reasonable timestamp (2020-2030)
-			if timestamp > 1577836800 && timestamp < 1893456000 {
-				return time.Unix(timestamp, 0), nil
-			}
-		}
-	}
-	return time.Now(), nil
 }
