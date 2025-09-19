@@ -92,6 +92,12 @@ func (l *Loader) createDefaultTemplates() error {
 				Category:    "git",
 			},
 			{
+				Name:        "Git diff",
+				Command:     "git diff",
+				Description: "Show changes in working directory",
+				Category:    "git",
+			},
+			{
 				Name:        "Docker ps",
 				Command:     "docker ps -a",
 				Description: "List all containers",
@@ -101,6 +107,12 @@ func (l *Loader) createDefaultTemplates() error {
 				Name:        "Docker images",
 				Command:     "docker images",
 				Description: "List all images",
+				Category:    "docker",
+			},
+			{
+				Name:        "Docker logs",
+				Command:     "docker logs -f",
+				Description: "Follow container logs",
 				Category:    "docker",
 			},
 			{
@@ -116,10 +128,40 @@ func (l *Loader) createDefaultTemplates() error {
 				Category:    "system",
 			},
 			{
-				Name:        "Process list",
-				Command:     "ps aux",
-				Description: "Show running processes",
+				Name:        "Process tree",
+				Command:     "pstree",
+				Description: "Display running processes as tree",
 				Category:    "system",
+			},
+			{
+				Name:        "Top processes",
+				Command:     "top",
+				Description: "Display running processes",
+				Category:    "system",
+			},
+			{
+				Name:        "Network connections",
+				Command:     "netstat -tulpn",
+				Description: "Show network connections",
+				Category:    "network",
+			},
+			{
+				Name:        "Ping test",
+				Command:     "ping -c 4 google.com",
+				Description: "Test network connectivity",
+				Category:    "network",
+			},
+			{
+				Name:        "Find files",
+				Command:     "find . -name",
+				Description: "Find files by name",
+				Category:    "files",
+			},
+			{
+				Name:        "Archive create",
+				Command:     "tar -czf archive.tar.gz",
+				Description: "Create compressed archive",
+				Category:    "files",
 			},
 		},
 	}

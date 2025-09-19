@@ -46,8 +46,17 @@ func DefaultConfig() *Config {
 			"secret",
 			"key",
 			"^history",
-			"^exit",
-			"^clear",
+			"^exit$",
+			"^clear$",
+			"^ls$",
+			"^ll$",
+			"^cd$",
+			"^pwd$",
+			"^\\.$",
+			"^\\.\\.*$",
+			"^\\d+$",         // Just numbers
+			"^[[:space:]]*$", // Just whitespace
+			"^h$",            // Single 'h' command
 		},
 		UI: UIConfig{
 			MaxItems:       1000,

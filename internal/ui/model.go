@@ -19,16 +19,20 @@ const (
 	SearchMode
 )
 
+// RefreshDataFunc is a callback function type for refreshing data
+type RefreshDataFunc func() error
+
 // Model represents the TUI application state
 type Model struct {
 	// Data
-	storage   storage.Storage
-	templates []templates.Template
-	config    *config.Config
+	storage     storage.Storage
+	templates   []templates.Template
+	config      *config.Config
+	refreshData RefreshDataFunc
 
 	// Current state
-	commands     []history.Command
-	filteredCmds []history.Command
+	commands     []history.Command // All available commands
+	filteredCmds []history.Command // Filtered commands for display
 	mode         ViewMode
 	cursor       int
 	searchQuery  string
@@ -44,15 +48,16 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(store storage.Storage, templateList []templates.Template, cfg *config.Config) Model {
+func NewModel(store storage.Storage, templateList []templates.Template, cfg *config.Config, refreshDataCallback RefreshDataFunc) Model {
 	model := Model{
-		storage:   store,
-		templates: templateList,
-		config:    cfg,
-		mode:      HistoryMode,
-		cursor:    0,
-		width:     80,
-		height:    24,
+		storage:     store,
+		templates:   templateList,
+		config:      cfg,
+		refreshData: refreshDataCallback,
+		mode:        HistoryMode,
+		cursor:      0,
+		width:       80,
+		height:      24,
 	}
 
 	// Load initial commands
@@ -68,6 +73,9 @@ func (m Model) Init() tea.Cmd {
 
 // loadCommands loads commands based on current mode and filters
 func (m *Model) loadCommands() {
+	// Always load all commands from storage first
+	m.commands = m.storage.GetAll()
+
 	switch m.mode {
 	case HistoryMode:
 		if m.searchQuery != "" {
@@ -84,9 +92,28 @@ func (m *Model) loadCommands() {
 	}
 
 	// Reset cursor if it's out of bounds
-	if m.cursor >= len(m.filteredCmds) {
+	if m.cursor >= len(m.filteredCmds) && m.mode != TemplatesMode {
 		m.cursor = 0
 	}
+	if m.cursor >= len(m.templates) && m.mode == TemplatesMode {
+		m.cursor = 0
+	}
+}
+
+// refreshAllData refreshes data from source files
+func (m *Model) refreshAllData() error {
+	if m.refreshData == nil {
+		return fmt.Errorf("refresh callback not available")
+	}
+
+	err := m.refreshData()
+	if err != nil {
+		return err
+	}
+
+	// Reload commands after refresh
+	m.loadCommands()
+	return nil
 }
 
 // getCurrentItem returns the currently selected item text

@@ -16,6 +16,11 @@ templates:
     command: "git branch -a"
     description: "List all branches"
     category: "git"
+    
+  - name: "Git diff"
+    command: "git diff"
+    description: "Show changes in working directory"
+    category: "git"
 
   # Docker commands  
   - name: "Docker ps"
@@ -49,6 +54,11 @@ templates:
     description: "Display running processes as tree"
     category: "system"
     
+  - name: "Top processes"
+    command: "top"
+    description: "Display running processes"
+    category: "system"
+    
   # Network commands
   - name: "Network connections"
     command: "netstat -tulpn"
@@ -59,3 +69,14 @@ templates:
     command: "ping -c 4 google.com"
     description: "Test network connectivity"
     category: "network"
+    
+  # File operations
+  - name: "Find files"
+    command: "find . -name"
+    description: "Find files by name"
+    category: "files"
+    
+  - name: "Archive create"
+    command: "tar -czf archive.tar.gz"
+    description: "Create compressed archive"
+    category: "files"

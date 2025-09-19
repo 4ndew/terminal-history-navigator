@@ -13,8 +13,17 @@ exclude_patterns:
   - "secret"
   - "key"
   - "^history"
-  - "^exit"
-  - "^clear"
+  - "^exit$"
+  - "^clear$"
+  - "^ls$"
+  - "^ll$"
+  - "^cd$"
+  - "^pwd$"
+  - "^\.$"
+  - "^\.\.+$"
+  - "^\d+$"              # Just numbers
+  - "^[[:space:]]*$"     # Just whitespace
+  - "^h$"                # Single 'h' command
 
 # UI settings
 ui:

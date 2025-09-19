@@ -23,7 +23,7 @@ func main() {
 	// Initialize storage
 	store := storage.NewMemoryStorage()
 
-	// Read command history
+	// Initialize reader
 	reader := history.NewReader(cfg.Sources)
 	reader.SetMaxLines(cfg.Performance.MaxHistoryLines)
 
@@ -35,13 +35,11 @@ func main() {
 		}
 	}
 
-	commands, err := reader.ReadHistory()
+	// Load initial history
+	err = loadHistory(reader, store)
 	if err != nil {
 		log.Fatalf("Failed to read history: %v", err)
 	}
-
-	// Store commands
-	store.Store(commands)
 
 	// Load templates
 	templateLoader := templates.NewLoader(cfg.TemplatesPath)
@@ -51,8 +49,13 @@ func main() {
 		// Continue without templates
 	}
 
-	// Create UI model
-	model := ui.NewModel(store, templatesData, cfg)
+	// Create refresh callback
+	refreshData := func() error {
+		return loadHistory(reader, store)
+	}
+
+	// Create UI model with refresh callback
+	model := ui.NewModel(store, templatesData, cfg, refreshData)
 
 	// Create TUI program
 	program := tea.NewProgram(
@@ -66,4 +69,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error running program: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// loadHistory reads command history and stores it
+func loadHistory(reader *history.Reader, store storage.Storage) error {
+	commands, err := reader.ReadHistory()
+	if err != nil {
+		return err
+	}
+
+	// Store commands
+	store.Store(commands)
+	return nil
 }
