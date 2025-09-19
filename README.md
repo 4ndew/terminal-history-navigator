@@ -1,34 +1,33 @@
 # Terminal History Navigator
 
-A fast TUI (Terminal User Interface) application for browsing and using your shell command history on macOS/Linux.
+TUI application for browsing shell command history on macOS/Linux.
 
 ## Features
 
-- **Browse History**: View commands from zsh/bash history files
-- **Smart Search**: Find commands with fuzzy search
-- **Command Templates**: Predefined commands with descriptions
-- **One-Click Copy**: Copy commands to clipboard instantly
-- **Frequency Sorting**: See most-used commands first
-- **Clean Interface**: Keyboard-driven TUI with vim-like navigation
-- **Smart Filtering**: Automatically filters out problematic commands
+- Browse commands from zsh/bash history files
+- Search commands with whole word/prefix matching
+- Command templates with descriptions
+- Copy commands to clipboard
+- Frequency and chronological sorting
+- Command success/failure indicators
+- Automatic filtering of problematic commands
+- Multi-line command support
 
-## Quick Start
+## Installation
 
-### 1. Install
 ```bash
 git clone https://github.com/4ndew/terminal-history-navigator
 cd terminal-history-navigator
 make install
 ```
 
-### 2. Setup Shell Alias
-Add to your `~/.zshrc` or `~/.bashrc`:
+Add to shell config:
 ```bash
 alias h='terminal-history-navigator'
 ```
 Reload: `source ~/.zshrc`
 
-### 3. Run
+Run
 ```bash
 h
 # or full command name
@@ -45,26 +44,28 @@ terminal-history-navigator
 | `Enter` | Copy command to clipboard |
 | `q` | Quit |
 
-### Features  
+### Modes
 | Key | Action |
 |-----|--------|
-| `/` | Search commands |
 | `t` | Toggle templates mode |
+| `/` | Search mode |
 | `f` | Sort by frequency |
-| `r` | Refresh data |
 | `?` | Show help |
 
-### Search Mode
+### Search
 | Key | Action |
 |-----|--------|
 | Type | Search as you type |
 | `↑/↓` | Navigate results |
 | `Enter` | Select result |
 | `Esc` | Exit search |
+| `Backspace` | Delete character |
+
+Search finds commands containing all query words as whole words or prefixes. Query "git c" matches "git clone", "git commit" but not "git branch".
 
 ## Configuration
 
-On first run, config files are created:
+Config files created on first run:
 
 **Main config**: `~/.config/history-nav/config.yaml`
 ```yaml
@@ -72,12 +73,11 @@ sources:
   - ~/.zsh_history
   - ~/.bash_history
 exclude_patterns:
-  - "^sudo "
+  - "^sudo su"
   - "password"
+  - "token"
   - "^exit$"
-  - "^clear$"
-  - "^\d+$"              # Just numbers
-  - "^h$"                # Single 'h' command
+  - "^\\d+$"
 ui:
   max_items: 1000
 ```
@@ -91,84 +91,53 @@ templates:
     category: "git"
 ```
 
-## Manual Installation Steps
-
-If `make install` doesn't work:
+## Manual Installation
 
 ```bash
-# 1. Build
 make build
-
-# 2. Copy binary
 sudo cp bin/terminal-history-navigator /usr/local/bin/
-
-# 3. Create config
 make setup-config
-
-# 4. Add alias to shell config
 echo 'alias h="terminal-history-navigator"' >> ~/.zshrc
-source ~/.zshrc
 ```
 
 ## Troubleshooting
 
-**No history showing?**
-- Check history files exist: `ls ~/.zsh_history ~/.bash_history`
-- Verify config sources in `~/.config/history-nav/config.yaml`
-- Force save current session: `fc -W` (zsh) or `history -a` (bash)
+**No history showing:**
+- Check files exist: `ls ~/.zsh_history ~/.bash_history`
+- Verify config sources
+- Force save: `fc -W` (zsh) or `history -a` (bash)
 
-**History not updating in real-time?**
-- By default, zsh only saves history on session exit
+**History not updating:**
 - Force save current session: `fc -W` (zsh) or `history -a` (bash)
-- For real-time history (optional): add to `~/.zshrc`:
+- For real-time updates add to `~/.zshrc`:
   ```bash
   setopt inc_append_history
   setopt share_history
   ```
 
-**Want to see command success/failure status?**
-- For enhanced history with exit codes: add to `~/.zshrc`:
+**Command status indicators:**
+- For exit code tracking add to `~/.zshrc`:
   ```bash
   setopt extended_history
   ```
-- Commands will show ✓ (success) or ✗ (failed) indicators
+- Shows ✓ (success) or ✗ (failed) for commands
 
-**Commands not being saved?**
-- Check if commands are being filtered by settings in `~/.zshrc`
-- Some commands may be excluded by `HIST_IGNORE_SPACE` or similar options
-
-**Problematic commands showing up?**
-- The app automatically filters out commands with parsing errors
-- You can add custom patterns to `exclude_patterns` in config
-- Commands with invalid timestamps or formatting are filtered out
-
-**Clipboard not working?**
-- macOS: Should work out of box
+**Clipboard issues:**
+- macOS: Works by default
 - Linux: Install `xclip` or `xsel`
-
-**Permission denied?**
-- Make sure binary is executable: `chmod +x /usr/local/bin/terminal-history-navigator`
 
 ## Development
 
 ```bash
-# Build
-make build
-
-# Test run  
-make run
-
-# Install locally
-make install
-
-# Clean
-make clean
+make build    # Build binary
+make run      # Test run
+make clean    # Clean artifacts
 ```
 
 ## Requirements
 
 - macOS 10.12+ or Linux
-- Go 1.21+ (for building from source)
+- Go 1.21+ (for building)
 
 ## License
 
