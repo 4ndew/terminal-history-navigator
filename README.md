@@ -9,9 +9,6 @@ TUI application for browsing shell command history on macOS/Linux.
 - Command templates with descriptions
 - Copy commands to clipboard
 - Frequency and chronological sorting
-- Command success/failure indicators
-- Automatic filtering of problematic commands
-- Multi-line command support
 
 ## Installation
 
