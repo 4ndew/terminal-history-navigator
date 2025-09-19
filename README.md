@@ -10,6 +10,7 @@ A fast TUI (Terminal User Interface) application for browsing and using your she
 - **One-Click Copy**: Copy commands to clipboard instantly
 - **Frequency Sorting**: See most-used commands first
 - **Clean Interface**: Keyboard-driven TUI with vim-like navigation
+- **Smart Filtering**: Automatically filters out problematic commands
 
 ## Quick Start
 
@@ -49,7 +50,6 @@ terminal-history-navigator
 |-----|--------|
 | `/` | Search commands |
 | `t` | Toggle templates mode |
-| `e` | Edit templates (in templates mode) |
 | `f` | Sort by frequency |
 | `r` | Refresh data |
 | `?` | Show help |
@@ -74,6 +74,10 @@ sources:
 exclude_patterns:
   - "^sudo "
   - "password"
+  - "^exit$"
+  - "^clear$"
+  - "^\d+$"              # Just numbers
+  - "^h$"                # Single 'h' command
 ui:
   max_items: 1000
 ```
@@ -132,6 +136,11 @@ source ~/.zshrc
 **Commands not being saved?**
 - Check if commands are being filtered by settings in `~/.zshrc`
 - Some commands may be excluded by `HIST_IGNORE_SPACE` or similar options
+
+**Problematic commands showing up?**
+- The app automatically filters out commands with parsing errors
+- You can add custom patterns to `exclude_patterns` in config
+- Commands with invalid timestamps or formatting are filtered out
 
 **Clipboard not working?**
 - macOS: Should work out of box

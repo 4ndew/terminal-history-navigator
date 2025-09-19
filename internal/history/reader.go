@@ -74,6 +74,9 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 		allCommands = append(allCommands, commands...)
 	}
 
+	// Filter out problematic commands before sorting
+	allCommands = r.filterProblematicCommands(allCommands)
+
 	// Sort all commands by timestamp (newest first)
 	sort.Slice(allCommands, func(i, j int) bool {
 		return allCommands[i].Timestamp.After(allCommands[j].Timestamp)
@@ -120,6 +123,74 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 	return result, nil
 }
 
+// filterProblematicCommands removes commands that cause display issues
+func (r *Reader) filterProblematicCommands(commands []Command) []Command {
+	var filtered []Command
+
+	// Get current time for comparison
+	now := time.Now()
+	oneYearAgo := now.AddDate(-1, 0, 0)
+
+	for _, cmd := range commands {
+		// Skip commands that are clearly problematic
+		if r.isProblematicCommand(cmd, now, oneYearAgo) {
+			continue
+		}
+		filtered = append(filtered, cmd)
+	}
+
+	return filtered
+}
+
+// isProblematicCommand checks if a command should be filtered out
+func (r *Reader) isProblematicCommand(cmd Command, now, oneYearAgo time.Time) bool {
+	// Filter out commands with future timestamps (parsing errors)
+	if cmd.Timestamp.After(now.Add(time.Hour)) {
+		return true
+	}
+
+	// Filter out commands with timestamps that are too old (likely parsing errors)
+	if cmd.Timestamp.Before(oneYearAgo) {
+		return true
+	}
+
+	// Filter out commands that are just whitespace or control characters
+	cleanText := strings.TrimSpace(cmd.Text)
+	if len(cleanText) == 0 {
+		return true
+	}
+
+	// Filter out commands with suspicious characters that might cause display issues
+	if strings.Contains(cleanText, "\x00") || strings.Contains(cleanText, "\xff") {
+		return true
+	}
+
+	// Filter out commands that are too short and likely noise
+	if len(cleanText) < 2 {
+		return true
+	}
+
+	// Filter out commands that are just numbers (likely parsing artifacts)
+	if isJustNumber(cleanText) {
+		return true
+	}
+
+	return false
+}
+
+// isJustNumber checks if a string contains only digits
+func isJustNumber(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // readFromFile reads commands from a specific history file
 func (r *Reader) readFromFile(filename string) ([]Command, error) {
 	file, err := os.Open(filename)
@@ -161,7 +232,7 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 		case strings.Contains(filename, "bash") || ext == ".bash_history":
 			cmd = Command{
 				Text:      strings.TrimSpace(line),
-				Timestamp: time.Now(),
+				Timestamp: time.Now().Add(-time.Duration(len(commands)) * time.Second), // Give recent timestamps but in order
 			}
 		default:
 			// Try zsh format first, then fallback
@@ -170,7 +241,7 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 			} else {
 				cmd = Command{
 					Text:      strings.TrimSpace(line),
-					Timestamp: time.Now(),
+					Timestamp: time.Now().Add(-time.Duration(len(commands)) * time.Second),
 				}
 			}
 		}
@@ -181,86 +252,6 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 	}
 
 	return commands, nil
-}
-
-// parseZshHistory parses zsh history format
-func (r *Reader) parseZshHistory(scanner *bufio.Scanner) []Command {
-	var commands []Command
-	lineCount := 0
-
-	for scanner.Scan() && lineCount < r.maxLines {
-		line := scanner.Text()
-		lineCount++
-
-		// Skip empty lines
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		cmd := r.parseZshLine(line)
-		if cmd.Text != "" {
-			commands = append(commands, cmd)
-		}
-	}
-
-	return commands
-}
-
-// parseBashHistory parses bash history format
-func (r *Reader) parseBashHistory(scanner *bufio.Scanner) []Command {
-	var commands []Command
-	lineCount := 0
-
-	for scanner.Scan() && lineCount < r.maxLines {
-		line := strings.TrimSpace(scanner.Text())
-		lineCount++
-
-		// Skip empty lines
-		if line == "" {
-			continue
-		}
-
-		// Bash history is typically just command text
-		cmd := Command{
-			Text:      line,
-			Timestamp: time.Now(), // No timestamp in basic bash history
-		}
-
-		commands = append(commands, cmd)
-	}
-
-	return commands
-}
-
-// parseGenericHistory tries to parse unknown history format
-func (r *Reader) parseGenericHistory(scanner *bufio.Scanner) []Command {
-	var commands []Command
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		if line == "" {
-			continue
-		}
-
-		// Try zsh format first
-		if strings.HasPrefix(line, ":") {
-			cmd := r.parseZshLine(line)
-			if cmd.Text != "" {
-				commands = append(commands, cmd)
-				continue
-			}
-		}
-
-		// Fall back to treating as plain command
-		cmd := Command{
-			Text:      line,
-			Timestamp: time.Now(),
-		}
-		commands = append(commands, cmd)
-	}
-
-	return commands
 }
 
 // parseZshLine parses a single zsh history line
@@ -336,10 +327,14 @@ func (r *Reader) shouldExclude(command string) bool {
 // parseTimestamp parses a Unix timestamp string
 func parseTimestamp(timestampStr string) (time.Time, error) {
 	// Try parsing as Unix timestamp
-	if len(timestampStr) == 10 {
-		// Parse Unix timestamp (seconds)
+	if len(timestampStr) >= 10 {
+		// Take only first 10 digits for Unix timestamp (seconds)
+		timestampStr = timestampStr[:10]
 		if timestamp, err := strconv.ParseInt(timestampStr, 10, 64); err == nil {
-			return time.Unix(timestamp, 0), nil
+			// Validate that timestamp is reasonable (between 2020 and 2030)
+			if timestamp > 1577836800 && timestamp < 1893456000 {
+				return time.Unix(timestamp, 0), nil
+			}
 		}
 	}
 

@@ -154,27 +154,105 @@ func (m Model) renderMainContent() string {
 			}
 		}
 
-		// Truncate long items (account for status indicator)
-		maxWidth := m.width - 12
-		if maxWidth < 20 {
-			maxWidth = 20
-		}
-		if len(item) > maxWidth {
-			item = item[:maxWidth-3] + "..."
-		}
+		// Wrap long items and apply styling
+		wrappedItem := m.wrapAndStyleItem(item, statusIndicator, i == selectedIndex)
+		renderedItems = append(renderedItems, wrappedItem)
+	}
 
-		// Apply styling based on selection
+	return strings.Join(renderedItems, "\n")
+}
+
+// wrapAndStyleItem wraps long text and applies styling
+func (m Model) wrapAndStyleItem(item string, statusIndicator string, isSelected bool) string {
+	// Calculate available width for text (account for indicators and padding)
+	maxWidth := m.width - 12 // Account for status indicators, selection markers, padding
+	if maxWidth < 20 {
+		maxWidth = 20
+	}
+
+	// If item fits in one line, render normally
+	if len(item) <= maxWidth {
 		var styledItem string
-		if i == selectedIndex {
+		if isSelected {
 			styledItem = selectedItemStyle.Render("► " + statusIndicator + item)
 		} else {
 			styledItem = normalItemStyle.Render("  " + statusIndicator + item)
 		}
-
-		renderedItems = append(renderedItems, styledItem)
+		return styledItem
 	}
 
-	return strings.Join(renderedItems, "\n")
+	// Item is too long - wrap it
+	lines := wrapText(item, maxWidth)
+	var wrappedLines []string
+
+	for j, line := range lines {
+		var prefix string
+		var indicator string
+
+		if j == 0 {
+			// First line - normal selection marker and status
+			if isSelected {
+				prefix = "► "
+			} else {
+				prefix = "  "
+			}
+			indicator = statusIndicator
+		} else {
+			// Continuation lines - indent
+			if isSelected {
+				prefix = "  "
+			} else {
+				prefix = "  "
+			}
+			indicator = "  " // Same width as statusIndicator for alignment
+		}
+
+		var styledLine string
+		if isSelected {
+			styledLine = selectedItemStyle.Render(prefix + indicator + line)
+		} else {
+			styledLine = normalItemStyle.Render(prefix + indicator + line)
+		}
+		wrappedLines = append(wrappedLines, styledLine)
+	}
+
+	return strings.Join(wrappedLines, "\n")
+}
+
+// wrapText wraps text to specified width, preserving word boundaries where possible
+func wrapText(text string, width int) []string {
+	if len(text) <= width {
+		return []string{text}
+	}
+
+	var lines []string
+
+	for len(text) > 0 {
+		if len(text) <= width {
+			lines = append(lines, text)
+			break
+		}
+
+		// Find the best break point
+		breakPoint := width
+
+		// Try to break at a space
+		for i := width - 1; i >= width/2; i-- {
+			if i < len(text) && text[i] == ' ' {
+				breakPoint = i
+				break
+			}
+		}
+
+		// Take the line
+		line := strings.TrimSpace(text[:breakPoint])
+		lines = append(lines, line)
+
+		// Continue with the rest
+		text = strings.TrimSpace(text[breakPoint:])
+	}
+
+	return lines
 }
 
 // renderEmptyState renders the empty state message
@@ -226,7 +304,7 @@ func (m Model) renderFooter() string {
 		sections = append(sections, lipgloss.NewStyle().Foreground(mutedColor).Render(position+sortInfo))
 	}
 
-	// Controls help (can be multi-line now)
+	// Controls help
 	controls := m.getControlsHelp()
 	sections = append(sections, footerStyle.Render(controls))
 
@@ -239,12 +317,10 @@ func (m Model) getControlsHelp() string {
 	case SearchMode:
 		return "esc: exit search | enter: select | ↑↓: navigate"
 	case TemplatesMode:
-		return "enter: copy | e: edit | t: history | /: search\n?: help | q: quit"
+		return "enter: copy | t: history | /: search | ?: help | q: quit"
 	default:
-		// Split history mode controls into two lines
-		line1 := "enter: copy | t: templates | /: search | f: frequency"
-		line2 := "s: successful | x: failed | r: refresh | ?: help | q: quit"
-		return line1 + "\n" + line2
+		// History mode controls
+		return "enter: copy | t: templates | /: search | f: frequency | r: refresh | ?: help | q: quit"
 	}
 }
 
@@ -262,8 +338,7 @@ MODES:
   t           Toggle templates mode
   /           Start search
   f           Sort by frequency (history mode)
-  r           Refresh data
-  e           Edit templates (templates mode)
+  r           Refresh data from source files
   
 SEARCH:
   /           Enter search mode

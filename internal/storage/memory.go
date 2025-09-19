@@ -87,12 +87,13 @@ func (s *MemoryStorage) GetByFrequency() []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
 
+	// Sort by frequency (count) first, then by recency
 	sort.Slice(commands, func(i, j int) bool {
-		// Primary sort by count (frequency)
+		// Primary sort by count (frequency) - higher count first
 		if commands[i].Count != commands[j].Count {
 			return commands[i].Count > commands[j].Count
 		}
-		// Secondary sort by timestamp
+		// Secondary sort by timestamp - more recent first
 		return commands[i].Timestamp.After(commands[j].Timestamp)
 	})
 
@@ -116,10 +117,16 @@ func (s *MemoryStorage) GetRecent(limit int) []history.Command {
 	return commands
 }
 
-// GetAll returns all stored commands
+// GetAll returns all stored commands (sorted by recency)
 func (s *MemoryStorage) GetAll() []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
+
+	// Sort by timestamp (most recent first) for consistency
+	sort.Slice(commands, func(i, j int) bool {
+		return commands[i].Timestamp.After(commands[j].Timestamp)
+	})
+
 	return commands
 }
 
