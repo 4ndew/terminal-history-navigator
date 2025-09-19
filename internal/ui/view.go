@@ -25,10 +25,10 @@ var (
 			Foreground(primaryColor).
 			Bold(true)
 
-	// Item styles
+	// Item styles - менее яркий цвет выделения
 	selectedItemStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(primaryColor).
+				Background(lipgloss.Color("#4A5568")). // Менее яркий серо-синий
 				Padding(0, 1)
 
 	normalItemStyle = lipgloss.NewStyle().
@@ -68,7 +68,7 @@ func (m Model) View() string {
 
 	var sections []string
 
-	// Header - always show
+	// Header - always show in all modes
 	sections = append(sections, m.renderHeader())
 	sections = append(sections, "") // Empty line for separation
 
@@ -82,9 +82,9 @@ func (m Model) View() string {
 	return strings.Join(sections, "\n")
 }
 
-// renderHeader renders the application header
+// renderHeader renders the application header - always visible in all modes
 func (m Model) renderHeader() string {
-	title := "Terminal History Navigator"
+	title := headerStyle.Render("Terminal History Navigator")
 
 	var modeStr string
 	switch m.mode {
@@ -93,14 +93,18 @@ func (m Model) renderHeader() string {
 	case TemplatesMode:
 		modeStr = "Templates"
 	case SearchMode:
-		modeStr = fmt.Sprintf("Search: %s", m.searchQuery)
+		if m.searchQuery == "" {
+			modeStr = "Search"
+		} else {
+			modeStr = fmt.Sprintf("Search: %s", m.searchQuery)
+		}
 	}
 
-	header := headerStyle.Render(title) + " - " + searchStyle.Render(modeStr)
-	return header
+	modeDisplay := searchStyle.Render(fmt.Sprintf("[%s]", modeStr))
+	return title + " " + modeDisplay
 }
 
-// renderMainContent renders the main content area
+// renderMainContent renders the main content area with improved scrolling for multiline items
 func (m Model) renderMainContent() string {
 	items, selectedIndex := m.getVisibleItems()
 
@@ -108,45 +112,117 @@ func (m Model) renderMainContent() string {
 		return m.renderEmptyState()
 	}
 
+	// Calculate available space for items (subtract header, separators, footer)
+	maxVisibleLines := m.height - 6 // Header(1) + separator(1) + separator(1) + footer(3)
+	if maxVisibleLines < 3 {
+		maxVisibleLines = 3
+	}
+
+	// Pre-calculate how many lines each item will take
+	itemHeights := make([]int, len(items))
+	totalLines := 0
+
+	for i, item := range items {
+		height := m.calculateItemHeight(item, i == selectedIndex)
+		itemHeights[i] = height
+		totalLines += height
+	}
+
+	// If all items fit, show them all
+	if totalLines <= maxVisibleLines {
+		return m.renderItemsRange(items, 0, len(items), selectedIndex, itemHeights)
+	}
+
+	// Calculate scroll window considering item heights
+	start, end := m.calculateScrollWindowForMultiline(items, itemHeights, selectedIndex, maxVisibleLines)
+	return m.renderItemsRange(items, start, end, selectedIndex, itemHeights)
+}
+
+// calculateItemHeight calculates how many lines an item will occupy
+func (m Model) calculateItemHeight(item string, isSelected bool) int {
+	maxWidth := m.width - 6 // Account for selection markers and padding
+	if maxWidth < 20 {
+		maxWidth = 20
+	}
+
+	var prefix string
+	if isSelected {
+		prefix = "► "
+	} else {
+		prefix = "  "
+	}
+
+	// Add status indicator space (approximate)
+	statusIndicatorSpace := 2 // "✓ " or "✗ " or empty
+
+	availableForText := maxWidth - len(prefix) - statusIndicatorSpace
+	if availableForText < 10 {
+		availableForText = 10
+	}
+
+	// If it fits in one line
+	if len(item) <= availableForText {
+		return 1
+	}
+
+	// Calculate wrapped lines
+	lines := wrapText(item, availableForText)
+	return len(lines)
+}
+
+// calculateScrollWindowForMultiline calculates scroll window considering multiline items
+func (m Model) calculateScrollWindowForMultiline(items []string, itemHeights []int, selectedIndex, maxVisibleLines int) (int, int) {
+	if selectedIndex < 0 || selectedIndex >= len(items) {
+		return 0, len(items)
+	}
+
+	// Try different start positions to find one that fits selected item in view
+	bestStart := 0
+	bestEnd := len(items)
+
+	// Start from selected item and work backwards
+	for start := selectedIndex; start >= 0; start-- {
+		currentLines := 0
+		end := start
+
+		// Count forward from start position
+		for i := start; i < len(items) && currentLines < maxVisibleLines; i++ {
+			if currentLines+itemHeights[i] <= maxVisibleLines {
+				currentLines += itemHeights[i]
+				end = i + 1
+			} else {
+				break
+			}
+		}
+
+		// If selected item is visible in this window
+		if selectedIndex >= start && selectedIndex < end {
+			bestStart = start
+			bestEnd = end
+
+			// If we have room and selected item is not centered, continue looking
+			selectedPosition := 0
+			for i := start; i < selectedIndex; i++ {
+				selectedPosition += itemHeights[i]
+			}
+
+			// If selected item is reasonably centered, use this window
+			if selectedPosition >= currentLines/3 {
+				break
+			}
+		}
+	}
+
+	return bestStart, bestEnd
+}
+
+// renderItemsRange renders items in the specified range with proper index mapping
+func (m Model) renderItemsRange(items []string, start, end, selectedIndex int, itemHeights []int) string {
 	var renderedItems []string
 
-	// Calculate visible range with proper scrolling
-	maxVisible := m.height - 6 // Account for header, separators, footer
-	if maxVisible < 5 {
-		maxVisible = 5
-	}
-
-	start := 0
-	end := len(items)
-
-	// If we have more items than can fit, calculate scroll window
-	if len(items) > maxVisible {
-		// Simple scrolling logic: keep selected item in view
-		if selectedIndex < maxVisible {
-			// If selection is in the first screen, start from 0
-			start = 0
-		} else {
-			// Otherwise, scroll to show selected item
-			start = selectedIndex - maxVisible + 1
-			if start < 0 {
-				start = 0
-			}
-		}
-
-		end = start + maxVisible
-		if end > len(items) {
-			end = len(items)
-			start = end - maxVisible
-			if start < 0 {
-				start = 0
-			}
-		}
-	}
-
-	// Render visible items
-	for i := start; i < end; i++ {
+	for i := start; i < end && i < len(items); i++ {
 		item := items[i]
-		isSelected := (i == selectedIndex)
+		isSelected := (i == selectedIndex) // Используем глобальный индекс правильно
 
 		// Add status indicator for commands with exit codes
 		statusIndicator := ""

@@ -36,7 +36,7 @@ func (s *MemoryStorage) Store(commands []history.Command) {
 	s.buildIndex()
 }
 
-// Search finds commands matching the query string
+// Search finds commands matching the query string with improved word matching
 func (s *MemoryStorage) Search(query string) []history.Command {
 	if query == "" {
 		return s.GetRecent(1000) // Return recent commands if no query
@@ -45,33 +45,60 @@ func (s *MemoryStorage) Search(query string) []history.Command {
 	query = strings.ToLower(query)
 	queryWords := strings.Fields(query)
 
-	// Find commands that contain ALL query words (AND logic)
+	// Find commands that contain ALL query words as whole words or prefixes
 	var results []history.Command
 
 	for _, cmd := range s.commands {
 		cmdText := strings.ToLower(cmd.Text)
-		matchesAll := true
 
-		// Check if command contains ALL query words
-		for _, word := range queryWords {
-			if !strings.Contains(cmdText, word) {
-				matchesAll = false
-				break
-			}
-		}
-
-		if matchesAll {
+		if s.commandMatchesQuery(cmdText, queryWords) {
 			results = append(results, cmd)
 		}
 	}
 
-	// Sort by recency first (newest first), then by frequency
+	// Sort by recency (newest first)
 	sort.Slice(results, func(i, j int) bool {
-		// Primary sort by timestamp (newest first)
 		return results[i].Timestamp.After(results[j].Timestamp)
 	})
 
 	return results
+}
+
+// commandMatchesQuery checks if a command matches all query words
+func (s *MemoryStorage) commandMatchesQuery(cmdText string, queryWords []string) bool {
+	cmdWords := strings.Fields(cmdText)
+
+	// Check if command contains ALL query words
+	for _, queryWord := range queryWords {
+		if !s.commandContainsWord(cmdWords, queryWord) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// commandContainsWord checks if command contains a word as whole word or prefix
+func (s *MemoryStorage) commandContainsWord(cmdWords []string, queryWord string) bool {
+	for _, cmdWord := range cmdWords {
+		// Clean command word of common shell characters
+		cleanCmdWord := cleanWord(cmdWord)
+		if cleanCmdWord == "" {
+			continue
+		}
+
+		// Check for exact match or prefix match
+		if cleanCmdWord == queryWord || strings.HasPrefix(cleanCmdWord, queryWord) {
+			return true
+		}
+
+		// Also check original word (before cleaning) for prefix match
+		if strings.HasPrefix(strings.ToLower(cmdWord), queryWord) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetByFrequency returns commands sorted by usage frequency
@@ -140,7 +167,7 @@ func (s *MemoryStorage) calculateSimulatedFrequency(cmd history.Command) int {
 	return freq
 }
 
-// GetRecent returns the most recently used commands
+// GetRecent returns the most recently used commands (newest first)
 func (s *MemoryStorage) GetRecent(limit int) []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
@@ -157,7 +184,7 @@ func (s *MemoryStorage) GetRecent(limit int) []history.Command {
 	return commands
 }
 
-// GetAll returns all stored commands (sorted by recency)
+// GetAll returns all stored commands (sorted by recency, newest first)
 func (s *MemoryStorage) GetAll() []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
@@ -191,7 +218,7 @@ func (s *MemoryStorage) buildIndex() {
 			s.indexed[word] = append(s.indexed[word], i)
 		}
 
-		// Also index command prefixes for partial matching
+		// Also index command prefixes for partial matching (only first 10 chars)
 		cmdLower := strings.ToLower(cmd.Text)
 		for j := 1; j <= len(cmdLower) && j <= 10; j++ {
 			prefix := cmdLower[:j]
