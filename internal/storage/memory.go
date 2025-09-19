@@ -56,9 +56,9 @@ func (s *MemoryStorage) Search(query string) []history.Command {
 		}
 	}
 
-	// Sort by recency (newest first)
+	// Sort by position (newest first - higher position = newer)
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].Timestamp.After(results[j].Timestamp)
+		return results[i].Position > results[j].Position
 	})
 
 	return results
@@ -123,14 +123,14 @@ func (s *MemoryStorage) GetByFrequency() []history.Command {
 		frequentCommands = commands
 	}
 
-	// Sort by frequency (count) first, then by recency
+	// Sort by frequency (count) first, then by position (most recent first)
 	sort.Slice(frequentCommands, func(i, j int) bool {
 		// Primary sort by count (frequency) - higher count first
 		if frequentCommands[i].Count != frequentCommands[j].Count {
 			return frequentCommands[i].Count > frequentCommands[j].Count
 		}
-		// Secondary sort by timestamp - more recent first
-		return frequentCommands[i].Timestamp.After(frequentCommands[j].Timestamp)
+		// Secondary sort by position - higher position (more recent) first
+		return frequentCommands[i].Position > frequentCommands[j].Position
 	})
 
 	return frequentCommands
@@ -172,9 +172,9 @@ func (s *MemoryStorage) GetRecent(limit int) []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
 
-	// Sort by timestamp (most recent first)
+	// Sort by position (highest position first - newest commands)
 	sort.Slice(commands, func(i, j int) bool {
-		return commands[i].Timestamp.After(commands[j].Timestamp)
+		return commands[i].Position > commands[j].Position
 	})
 
 	if limit > 0 && limit < len(commands) {
@@ -184,14 +184,14 @@ func (s *MemoryStorage) GetRecent(limit int) []history.Command {
 	return commands
 }
 
-// GetAll returns all stored commands (sorted by recency, newest first)
+// GetAll returns all stored commands (sorted by position, newest first)
 func (s *MemoryStorage) GetAll() []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
 
-	// Sort by timestamp (most recent first) for consistency
+	// Sort by position (highest position first - newest commands)
 	sort.Slice(commands, func(i, j int) bool {
-		return commands[i].Timestamp.After(commands[j].Timestamp)
+		return commands[i].Position > commands[j].Position
 	})
 
 	return commands
