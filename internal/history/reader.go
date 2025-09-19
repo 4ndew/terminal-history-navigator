@@ -82,7 +82,7 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 		return allCommands[i].Timestamp.After(allCommands[j].Timestamp)
 	})
 
-	// Deduplicate and count, keeping the most recent occurrence at the top
+	// Deduplicate and count frequency
 	commandMap := make(map[string]*Command)
 	var result []Command
 
@@ -99,7 +99,7 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 		}
 
 		if existing, found := commandMap[cleanText]; found {
-			// Update count and keep most recent timestamp
+			// Increment count and keep most recent timestamp
 			existing.Count++
 			if cmd.Timestamp.After(existing.Timestamp) {
 				existing.Timestamp = cmd.Timestamp
@@ -108,14 +108,15 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 			}
 		} else {
 			// First occurrence - add to result and map
-			cmd.Text = cleanText
-			cmd.Count = 1
-			commandMap[cleanText] = &cmd
-			result = append(result, cmd)
+			newCmd := cmd
+			newCmd.Text = cleanText
+			newCmd.Count = 1
+			commandMap[cleanText] = &newCmd
+			result = append(result, newCmd)
 		}
 	}
 
-	// Re-sort result by timestamp after deduplication to ensure proper order
+	// Re-sort result by timestamp after deduplication
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Timestamp.After(result[j].Timestamp)
 	})
@@ -127,13 +128,12 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 func (r *Reader) filterProblematicCommands(commands []Command) []Command {
 	var filtered []Command
 
-	// Get current time for comparison
 	now := time.Now()
-	oneYearAgo := now.AddDate(-1, 0, 0)
+	fiveYearsAgo := now.AddDate(-5, 0, 0)
 
 	for _, cmd := range commands {
 		// Skip commands that are clearly problematic
-		if r.isProblematicCommand(cmd, now, oneYearAgo) {
+		if r.isProblematicCommand(cmd, now, fiveYearsAgo) {
 			continue
 		}
 		filtered = append(filtered, cmd)
@@ -143,34 +143,29 @@ func (r *Reader) filterProblematicCommands(commands []Command) []Command {
 }
 
 // isProblematicCommand checks if a command should be filtered out
-func (r *Reader) isProblematicCommand(cmd Command, now, oneYearAgo time.Time) bool {
-	// Filter out commands with future timestamps (parsing errors)
+func (r *Reader) isProblematicCommand(cmd Command, now, fiveYearsAgo time.Time) bool {
+	// Filter out commands with future timestamps
 	if cmd.Timestamp.After(now.Add(time.Hour)) {
 		return true
 	}
 
-	// Filter out commands with timestamps that are too old (likely parsing errors)
-	if cmd.Timestamp.Before(oneYearAgo) {
+	// Filter out very old commands (likely parsing errors)
+	if cmd.Timestamp.Before(fiveYearsAgo) {
 		return true
 	}
 
-	// Filter out commands that are just whitespace or control characters
+	// Filter out empty commands
 	cleanText := strings.TrimSpace(cmd.Text)
 	if len(cleanText) == 0 {
 		return true
 	}
 
-	// Filter out commands with suspicious characters that might cause display issues
+	// Filter out commands with control characters
 	if strings.Contains(cleanText, "\x00") || strings.Contains(cleanText, "\xff") {
 		return true
 	}
 
-	// Filter out commands that are too short and likely noise
-	if len(cleanText) < 2 {
-		return true
-	}
-
-	// Filter out commands that are just numbers (likely parsing artifacts)
+	// Filter out commands that are just numbers
 	if isJustNumber(cleanText) {
 		return true
 	}
@@ -199,7 +194,7 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 	}
 	defer file.Close()
 
-	// Read all lines first
+	// Read all lines
 	var lines []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -218,9 +213,8 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 
 	// Parse lines based on file type
 	var commands []Command
-	ext := filepath.Ext(filename)
 
-	for _, line := range lines {
+	for i, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -228,16 +222,16 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 		var cmd Command
 		switch {
 		case strings.Contains(filename, "zsh"):
-			cmd = r.parseZshLine(line)
-		case strings.Contains(filename, "bash") || ext == ".bash_history":
+			cmd = r.parseZshLine(line, i)
+		case strings.Contains(filename, "bash") || filepath.Ext(filename) == ".bash_history":
 			cmd = Command{
 				Text:      strings.TrimSpace(line),
-				Timestamp: time.Now().Add(-time.Duration(len(commands)) * time.Second), // Give recent timestamps but in order
+				Timestamp: time.Now().Add(-time.Duration(len(commands)) * time.Second),
 			}
 		default:
 			// Try zsh format first, then fallback
-			if strings.HasPrefix(line, ":") {
-				cmd = r.parseZshLine(line)
+			if strings.HasPrefix(strings.TrimSpace(line), ":") {
+				cmd = r.parseZshLine(line, i)
 			} else {
 				cmd = Command{
 					Text:      strings.TrimSpace(line),
@@ -255,47 +249,54 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 }
 
 // parseZshLine parses a single zsh history line
-func (r *Reader) parseZshLine(line string) Command {
+func (r *Reader) parseZshLine(line string, lineNum int) Command {
 	line = strings.TrimSpace(line)
 
-	// Handle multi-line commands (zsh can have continuation lines)
+	// Handle plain commands (not in zsh extended format)
 	if !strings.HasPrefix(line, ":") {
-		return Command{
-			Text:      line,
-			Timestamp: time.Now(),
+		if line != "" {
+			return Command{
+				Text:      line,
+				Timestamp: time.Now().Add(-time.Duration(lineNum) * time.Second),
+			}
 		}
-	}
-
-	// Extended zsh format can include exit code:
-	// : 1640995200:0;command (standard)
-	// : 1640995200:0:1;command (with exit code 1)
-
-	// Find the semicolon that separates metadata from command
-	semiIndex := strings.Index(line, ";")
-	if semiIndex == -1 || semiIndex == len(line)-1 {
-		// No command after semicolon
 		return Command{Text: "", Timestamp: time.Now()}
 	}
 
-	// Extract metadata from the beginning
-	metadataPart := line[1:semiIndex] // Remove leading ':'
+	// Extended zsh format: : timestamp:duration;command
+	semiIndex := strings.Index(line, ";")
+	if semiIndex == -1 || semiIndex == len(line)-1 {
+		// Malformed line, try to extract command anyway
+		if len(line) > 1 {
+			possibleCmd := strings.TrimSpace(line[1:])
+			if possibleCmd != "" && !strings.Contains(possibleCmd, ":") {
+				return Command{
+					Text:      possibleCmd,
+					Timestamp: time.Now().Add(-time.Duration(lineNum) * time.Second),
+				}
+			}
+		}
+		return Command{Text: "", Timestamp: time.Now()}
+	}
+
+	// Extract metadata
+	metadataPart := line[1:semiIndex]
 	var timestamp time.Time
 	var exitCode int
 	var hasExit bool
 
-	// Split by colon to get timestamp, duration, and potentially exit code
 	parts := strings.Split(metadataPart, ":")
 	if len(parts) >= 1 && parts[0] != "" {
 		if ts, err := parseTimestamp(parts[0]); err == nil {
 			timestamp = ts
 		} else {
-			timestamp = time.Now()
+			timestamp = time.Now().Add(-time.Duration(lineNum) * time.Second)
 		}
 	} else {
-		timestamp = time.Now()
+		timestamp = time.Now().Add(-time.Duration(lineNum) * time.Second)
 	}
 
-	// Check for exit code (some zsh configurations store this)
+	// Check for exit code
 	if len(parts) >= 3 && parts[2] != "" {
 		if code, err := strconv.Atoi(parts[2]); err == nil {
 			exitCode = code
@@ -303,7 +304,7 @@ func (r *Reader) parseZshLine(line string) Command {
 		}
 	}
 
-	// Extract command (everything after semicolon)
+	// Extract command
 	command := strings.TrimSpace(line[semiIndex+1:])
 
 	return Command{
@@ -326,18 +327,14 @@ func (r *Reader) shouldExclude(command string) bool {
 
 // parseTimestamp parses a Unix timestamp string
 func parseTimestamp(timestampStr string) (time.Time, error) {
-	// Try parsing as Unix timestamp
 	if len(timestampStr) >= 10 {
-		// Take only first 10 digits for Unix timestamp (seconds)
 		timestampStr = timestampStr[:10]
 		if timestamp, err := strconv.ParseInt(timestampStr, 10, 64); err == nil {
-			// Validate that timestamp is reasonable (between 2020 and 2030)
+			// Validate reasonable timestamp (2020-2030)
 			if timestamp > 1577836800 && timestamp < 1893456000 {
 				return time.Unix(timestamp, 0), nil
 			}
 		}
 	}
-
-	// Fallback to current time
 	return time.Now(), nil
 }

@@ -19,16 +19,12 @@ const (
 	SearchMode
 )
 
-// RefreshDataFunc is a callback function type for refreshing data
-type RefreshDataFunc func() error
-
 // Model represents the TUI application state
 type Model struct {
 	// Data
-	storage     storage.Storage
-	templates   []templates.Template
-	config      *config.Config
-	refreshData RefreshDataFunc
+	storage   storage.Storage
+	templates []templates.Template
+	config    *config.Config
 
 	// Current state
 	commands     []history.Command // All available commands
@@ -48,16 +44,15 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(store storage.Storage, templateList []templates.Template, cfg *config.Config, refreshDataCallback RefreshDataFunc) Model {
+func NewModel(store storage.Storage, templateList []templates.Template, cfg *config.Config) Model {
 	model := Model{
-		storage:     store,
-		templates:   templateList,
-		config:      cfg,
-		refreshData: refreshDataCallback,
-		mode:        HistoryMode,
-		cursor:      0,
-		width:       80,
-		height:      24,
+		storage:   store,
+		templates: templateList,
+		config:    cfg,
+		mode:      HistoryMode,
+		cursor:    0,
+		width:     80,
+		height:    24,
 	}
 
 	// Load initial commands
@@ -98,22 +93,6 @@ func (m *Model) loadCommands() {
 	if m.cursor >= len(m.templates) && m.mode == TemplatesMode {
 		m.cursor = 0
 	}
-}
-
-// refreshAllData refreshes data from source files
-func (m *Model) refreshAllData() error {
-	if m.refreshData == nil {
-		return fmt.Errorf("refresh callback not available")
-	}
-
-	err := m.refreshData()
-	if err != nil {
-		return err
-	}
-
-	// Reload commands after refresh
-	m.loadCommands()
-	return nil
 }
 
 // getCurrentItem returns the currently selected item text
@@ -169,21 +148,21 @@ func (m *Model) switchToHistoryMode() {
 	m.cursor = 0
 	m.searchQuery = ""
 	m.loadCommands()
-	m.statusMsg = "History mode"
+	m.statusMsg = "" // Clear status to show normal mode
 }
 
 // switchToTemplatesMode switches to templates view mode
 func (m *Model) switchToTemplatesMode() {
 	m.mode = TemplatesMode
 	m.cursor = 0
-	m.statusMsg = "Templates mode"
+	m.statusMsg = ""
 }
 
 // switchToSearchMode switches to search mode
 func (m *Model) switchToSearchMode() {
 	m.mode = SearchMode
 	m.cursor = 0
-	m.statusMsg = "Search mode - type to search"
+	m.statusMsg = ""
 }
 
 // exitSearchMode exits search mode and returns to history
