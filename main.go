@@ -50,7 +50,7 @@ func main() {
 	}
 
 	// Create UI model
-	model := ui.NewModel(store, templatesData, cfg)
+	model := ui.NewModel(store, templatesData, templateLoader, cfg)
 
 	// Create TUI program
 	program := tea.NewProgram(

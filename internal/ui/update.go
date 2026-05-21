@@ -96,10 +96,49 @@ func (m Model) handleNormalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+		
+	case "s":
+	    if m.mode == HistoryMode || m.mode == SearchMode {
+	        cmd := m.getCurrentItem()
+	        if cmd == "" {
+	            m.setError("Nothing selected")
+	            return m, nil
+	        }
+	        t, err := m.templateLoader.Add(cmd)
+	        if err != nil {
+	            m.setError(fmt.Sprintf("Failed to save template: %v", err))
+	            return m, nil
+	        }
+	        updated, _ := m.templateLoader.Load()
+	        m.templates = updated
+	        m.setStatus(fmt.Sprintf("Saved as template: %s [%s]", t.Name, t.Category))
+	    }
+	    return m, nil
+
+	case "d":
+	    if m.mode == TemplatesMode {
+	        if len(m.templates) == 0 || m.cursor >= len(m.templates) {
+	            m.setError("Nothing selected")
+	            return m, nil
+	        }
+	        cmd := m.templates[m.cursor].Command
+	        name := m.templates[m.cursor].Name
+	        if err := m.templateLoader.Delete(cmd); err != nil {
+	            m.setError(fmt.Sprintf("Failed to delete template: %v", err))
+	            return m, nil
+	        }
+	        updated, _ := m.templateLoader.Load()
+	        m.templates = updated
+	        if m.cursor >= len(m.templates) && m.cursor > 0 {
+	            m.cursor--
+	        }
+	        m.setStatus(fmt.Sprintf("Deleted template: %s", name))
+	    }
+	    return m, nil
 
 	case "?":
-		m.showHelp = !m.showHelp
-		return m, nil
+	    m.showHelp = !m.showHelp
+	    return m, nil
 
 	case "esc":
 		m.clearMessages()

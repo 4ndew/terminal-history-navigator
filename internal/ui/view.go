@@ -130,12 +130,22 @@ func (m Model) renderMainContent() string {
 
 	// If all items fit, show them all
 	if totalLines <= maxVisibleLines {
-		return m.renderItemsRange(items, 0, len(items), selectedIndex, itemHeights)
+	    return m.renderItemsRange(items, 0, len(items), selectedIndex, itemHeights)
 	}
 
-	// Calculate scroll window considering item heights
-	start, end := m.calculateScrollWindowForMultiline(items, itemHeights, selectedIndex, maxVisibleLines)
-	return m.renderItemsRange(items, start, end, selectedIndex, itemHeights)
+	m.adjustScrollOffset(itemHeights, maxVisibleLines)
+
+	lines := 0
+	end := m.scrollOffset
+	for i := m.scrollOffset; i < len(items); i++ {
+	    lines += itemHeights[i]
+	    if lines > maxVisibleLines {
+	        break
+	    }
+	    end = i + 1
+	}
+
+	return m.renderItemsRange(items, m.scrollOffset, end, selectedIndex, itemHeights)
 }
 
 // calculateItemHeight calculates how many lines an item will occupy
@@ -168,52 +178,6 @@ func (m Model) calculateItemHeight(item string, isSelected bool) int {
 	// Calculate wrapped lines
 	lines := wrapText(item, availableForText)
 	return len(lines)
-}
-
-// calculateScrollWindowForMultiline calculates scroll window considering multiline items
-func (m Model) calculateScrollWindowForMultiline(items []string, itemHeights []int, selectedIndex, maxVisibleLines int) (int, int) {
-	if selectedIndex < 0 || selectedIndex >= len(items) {
-		return 0, len(items)
-	}
-
-	// Try different start positions to find one that fits selected item in view
-	bestStart := 0
-	bestEnd := len(items)
-
-	// Start from selected item and work backwards
-	for start := selectedIndex; start >= 0; start-- {
-		currentLines := 0
-		end := start
-
-		// Count forward from start position
-		for i := start; i < len(items) && currentLines < maxVisibleLines; i++ {
-			if currentLines+itemHeights[i] <= maxVisibleLines {
-				currentLines += itemHeights[i]
-				end = i + 1
-			} else {
-				break
-			}
-		}
-
-		// If selected item is visible in this window
-		if selectedIndex >= start && selectedIndex < end {
-			bestStart = start
-			bestEnd = end
-
-			// If we have room and selected item is not centered, continue looking
-			selectedPosition := 0
-			for i := start; i < selectedIndex; i++ {
-				selectedPosition += itemHeights[i]
-			}
-
-			// If selected item is reasonably centered, use this window
-			if selectedPosition >= currentLines/3 {
-				break
-			}
-		}
-	}
-
-	return bestStart, bestEnd
 }
 
 // renderItemsRange renders items in the specified range with proper index mapping
@@ -448,9 +412,9 @@ func (m Model) getControlsHelp() string {
 	case SearchMode:
 		return "esc: exit | enter: copy | ↑↓: navigate"
 	case TemplatesMode:
-		return "enter: copy | t: history | /: search | ?: help | q: quit"
+	    return "enter: copy | d: delete | t: history | /: search | ?: help | q: quit"
 	default:
-		return "enter: copy | t: templates | /: search | f: frequency | ?: help | q: quit"
+	    return "enter: copy | s: save as template | t: templates | /: search | f: freq | ?: help | q: quit"
 	}
 }
 

@@ -1,14 +1,24 @@
 # Terminal History Navigator
 
-TUI application for browsing shell command history on macOS/Linux.
+TUI application for browsing shell command history on macOS and Linux.
 
 ## Features
 
 - Browse commands from zsh/bash history files
-- Search commands with whole word/prefix matching
-- Command templates with descriptions
+- Chronological ordering based on actual timestamps (zsh extended history)
+- Accurate frequency tracking across sessions
+- Search with whole-word and prefix matching
+- Command templates with categories — add any command with one key, delete with one key
 - Copy commands to clipboard
 - Frequency and chronological sorting
+- Exit code indicators (✓ / ✗) for zsh extended history
+- Centered cursor scrolling
+
+## Requirements
+
+- macOS 10.12+ or Linux
+- Go 1.21+ (for building only)
+- Linux clipboard: `xclip` or `xsel`
 
 ## Installation
 
@@ -18,53 +28,70 @@ cd terminal-history-navigator
 make install
 ```
 
-Add to shell config:
-```bash
-alias h='terminal-history-navigator'
-```
-Reload: `source ~/.zshrc`
+Add alias to shell config:
 
-Run
 ```bash
-h
-# or full command name
-terminal-history-navigator
+echo 'alias h="terminal-history-navigator"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
 ## Usage
 
+```bash
+h
+# or
+terminal-history-navigator
+```
+
+## Key Bindings
+
 ### Navigation
+
 | Key | Action |
 |-----|--------|
-| `↑/k` | Move up |
-| `↓/j` | Move down |
-| `Enter` | Copy command to clipboard |
-| `q` | Quit |
+| `↑` / `k` | Move up |
+| `↓` / `j` | Move down |
+| `Enter` | Copy selected command to clipboard |
+| `q` / `Ctrl+C` | Quit |
 
 ### Modes
+
 | Key | Action |
 |-----|--------|
+| `h` | Switch to history mode |
 | `t` | Toggle templates mode |
-| `/` | Search mode |
-| `f` | Sort by frequency |
+| `/` | Enter search mode |
+| `f` | Toggle frequency / chronological sort (history mode) |
 | `?` | Show help |
 
-### Search
+### Templates
+
 | Key | Action |
 |-----|--------|
-| Type | Search as you type |
-| `↑/↓` | Navigate results |
-| `Enter` | Select result |
-| `Esc` | Exit search |
-| `Backspace` | Delete character |
+| `s` | Save selected command as template (history / search mode) |
+| `d` | Delete selected template (templates mode) |
+| `Enter` | Copy template command to clipboard |
 
-Search finds commands containing all query words as whole words or prefixes. Query "git c" matches "git clone", "git commit" but not "git branch".
+Category is detected automatically from the command prefix (git, docker, ssh, go, npm, etc.).
+
+### Search
+
+| Key | Action |
+|-----|--------|
+| Type | Filter as you type |
+| `↑` / `↓` | Navigate results |
+| `Enter` | Copy selected result |
+| `Esc` | Exit search, return to history |
+| `Backspace` | Delete last character |
+
+Search matches commands containing all query words as whole words or prefixes. For example, `git c` matches `git clone` and `git commit` but not `git branch`.
 
 ## Configuration
 
-Config files created on first run:
+Config files are created automatically on first run.
 
-**Main config**: `~/.config/history-nav/config.yaml`
+### Main config — `~/.config/history-nav/config.yaml`
+
 ```yaml
 sources:
   - ~/.zsh_history
@@ -73,19 +100,87 @@ exclude_patterns:
   - "^sudo su"
   - "password"
   - "token"
+  - "secret"
   - "^exit$"
-  - "^\\d+$"
+  - "^clear$"
+  - "^\d+$"
 ui:
   max_items: 1000
+  show_timestamps: true
+  show_frequency: true
+performance:
+  max_history_lines: 10000
 ```
 
-**Templates**: `~/.config/history-nav/templates.yaml`
+### Templates — `~/.config/history-nav/templates.yaml`
+
 ```yaml
 templates:
-  - name: "Git status"
-    command: "git status" 
-    description: "Show working tree status"
+  - name: "Git log oneline"
+    command: "git log --oneline -10"
+    description: "Show last 10 commits"
     category: "git"
+```
+
+Templates can be managed directly from the TUI — no manual editing required.
+
+## Recommended Shell Settings
+
+For accurate timestamps and exit code tracking, add to `~/.zshrc`:
+
+```bash
+# Write timestamp and duration to each history entry
+setopt extended_history
+
+# Append to history immediately, share across sessions
+setopt inc_append_history
+setopt share_history
+```
+
+Without `extended_history`, commands are ordered by line number in the history file rather than by actual time. With it, ordering is based on unix timestamps and is accurate across multiple files and sessions.
+
+## Troubleshooting
+
+**No history showing**
+
+Check that the files exist:
+```bash
+ls ~/.zsh_history ~/.bash_history
+```
+
+Force-save the current session before running:
+```bash
+fc -W        # zsh
+history -a   # bash
+```
+
+**History not updating between sessions**
+
+Add to `~/.zshrc`:
+```bash
+setopt inc_append_history
+setopt share_history
+```
+
+**Exit code indicators not showing**
+
+Requires `setopt extended_history` in `~/.zshrc`. Indicators show ✓ for exit code 0 and ✗ for anything else.
+
+**Clipboard not working on Linux**
+
+Install either `xclip` or `xsel`:
+```bash
+sudo apt install xclip   # Debian/Ubuntu
+sudo dnf install xclip   # Fedora
+brew install xclip       # Homebrew on Linux
+```
+
+## Development
+
+```bash
+make build    # Build binary to bin/
+make run      # Build and run
+make clean    # Remove build artifacts
 ```
 
 ## Manual Installation
@@ -94,47 +189,7 @@ templates:
 make build
 sudo cp bin/terminal-history-navigator /usr/local/bin/
 make setup-config
-echo 'alias h="terminal-history-navigator"' >> ~/.zshrc
 ```
-
-## Troubleshooting
-
-**No history showing:**
-- Check files exist: `ls ~/.zsh_history ~/.bash_history`
-- Verify config sources
-- Force save: `fc -W` (zsh) or `history -a` (bash)
-
-**History not updating:**
-- Force save current session: `fc -W` (zsh) or `history -a` (bash)
-- For real-time updates add to `~/.zshrc`:
-  ```bash
-  setopt inc_append_history
-  setopt share_history
-  ```
-
-**Command status indicators:**
-- For exit code tracking add to `~/.zshrc`:
-  ```bash
-  setopt extended_history
-  ```
-- Shows ✓ (success) or ✗ (failed) for commands
-
-**Clipboard issues:**
-- macOS: Works by default
-- Linux: Install `xclip` or `xsel`
-
-## Development
-
-```bash
-make build    # Build binary
-make run      # Test run
-make clean    # Clean artifacts
-```
-
-## Requirements
-
-- macOS 10.12+ or Linux
-- Go 1.21+ (for building)
 
 ## License
 
