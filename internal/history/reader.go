@@ -82,37 +82,32 @@ func (r *Reader) ReadHistory() ([]Command, error) {
 	})
 
 	// Deduplicate and count frequency
-	commandMap := make(map[string]*Command)
+	commandMap := make(map[string]int)
 	var result []Command
 
 	for _, cmd := range allCommands {
-		// Skip excluded commands
-		if r.shouldExclude(cmd.Text) {
-			continue
-		}
+	    if r.shouldExclude(cmd.Text) {
+	        continue
+	    }
+	    cleanText := strings.TrimSpace(cmd.Text)
+	    if cleanText == "" {
+	        continue
+	    }
 
-		// Clean command text
-		cleanText := strings.TrimSpace(cmd.Text)
-		if cleanText == "" {
-			continue
-		}
-
-		if existing, found := commandMap[cleanText]; found {
-			// Increment count and keep highest position (most recent appearance)
-			existing.Count++
-			if cmd.Position > existing.Position {
-				existing.Position = cmd.Position
-				existing.ExitCode = cmd.ExitCode
-				existing.HasExit = cmd.HasExit
-			}
-		} else {
-			// First occurrence - add to result and map
-			newCmd := cmd
-			newCmd.Text = cleanText
-			newCmd.Count = 1
-			commandMap[cleanText] = &newCmd
-			result = append(result, newCmd)
-		}
+	    if idx, found := commandMap[cleanText]; found {
+	        result[idx].Count++
+	        if cmd.Position > result[idx].Position {
+	            result[idx].Position = cmd.Position
+	            result[idx].ExitCode = cmd.ExitCode
+	            result[idx].HasExit = cmd.HasExit
+	        }
+	    } else {
+	        newCmd := cmd
+	        newCmd.Text = cleanText
+	        newCmd.Count = 1
+	        commandMap[cleanText] = len(result) // индекс будущего элемента
+	        result = append(result, newCmd)
+	    }
 	}
 
 	// Re-sort result by position after deduplication (newest first)
@@ -236,58 +231,49 @@ func (r *Reader) readFromFile(filename string) ([]Command, error) {
 
 // parseZshLine parses a single zsh history line
 func (r *Reader) parseZshLine(line string, lineNum int) Command {
-	line = strings.TrimSpace(line)
+    line = strings.TrimSpace(line)
 
-	// Handle plain commands (not in zsh extended format)
-	if !strings.HasPrefix(line, ":") {
-		if line != "" {
-			return Command{
-				Text:     line,
-				Position: lineNum, // Position in file
-			}
-		}
-		return Command{Text: "", Position: lineNum}
-	}
+    if !strings.HasPrefix(line, ":") {
+        if line != "" {
+            return Command{
+                Text:     line,
+                Position: lineNum,
+            }
+        }
+        return Command{Text: "", Position: lineNum}
+    }
 
-	// Extended zsh format: : timestamp:duration;command
-	semiIndex := strings.Index(line, ";")
-	if semiIndex == -1 || semiIndex == len(line)-1 {
-		// Malformed line, try to extract command anyway
-		if len(line) > 1 {
-			possibleCmd := strings.TrimSpace(line[1:])
-			if possibleCmd != "" && !strings.Contains(possibleCmd, ":") {
-				return Command{
-					Text:     possibleCmd,
-					Position: lineNum,
-				}
-			}
-		}
-		return Command{Text: "", Position: lineNum}
-	}
+    semiIndex := strings.Index(line, ";")
+    if semiIndex == -1 || semiIndex == len(line)-1 {
+        return Command{Text: "", Position: lineNum}
+    }
 
-	// Extract metadata
-	metadataPart := line[1:semiIndex]
-	var exitCode int
-	var hasExit bool
+    metadataPart := line[1:semiIndex]
+    var exitCode int
+    var hasExit bool
+    position := lineNum
 
-	parts := strings.Split(metadataPart, ":")
-	// Check for exit code (third part in format timestamp:duration:exitcode)
-	if len(parts) >= 3 && parts[2] != "" {
-		if code, err := strconv.Atoi(parts[2]); err == nil {
-			exitCode = code
-			hasExit = true
-		}
-	}
+    parts := strings.Split(metadataPart, ":")
+    if len(parts) >= 1 {
+        if ts, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64); err == nil && ts > 0 {
+            position = int(ts)
+        }
+    }
+    if len(parts) >= 3 && parts[2] != "" {
+        if code, err := strconv.Atoi(parts[2]); err == nil {
+            exitCode = code
+            hasExit = true
+        }
+    }
 
-	// Extract command
-	command := strings.TrimSpace(line[semiIndex+1:])
+    command := strings.TrimSpace(line[semiIndex+1:])
 
-	return Command{
-		Text:     command,
-		Position: lineNum, // Position in file
-		ExitCode: exitCode,
-		HasExit:  hasExit,
-	}
+    return Command{
+        Text:     command,
+        Position: position,
+        ExitCode: exitCode,
+        HasExit:  hasExit,
+    }
 }
 
 // shouldExclude checks if a command should be excluded based on patterns

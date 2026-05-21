@@ -69,6 +69,83 @@ func (l *Loader) Load() ([]Template, error) {
 	return templateData.Templates, nil
 }
 
+func (l *Loader) Add(command string) (Template, error) {
+    existing, err := l.Load()
+    if err != nil {
+        return Template{}, err
+    }
+
+    for _, t := range existing {
+        if t.Command == command {
+            return t, nil // уже есть, не добавлять
+        }
+    }
+
+    t := Template{
+        Name:     truncateTemplateName(command, 40),
+        Command:  command,
+        Category: detectCategory(command),
+    }
+
+    data := TemplateData{Templates: append(existing, t)}
+    return t, l.save(data)
+}
+
+func (l *Loader) Delete(command string) error {
+    existing, err := l.Load()
+    if err != nil {
+        return err
+    }
+
+    filtered := existing[:0]
+    for _, t := range existing {
+        if t.Command != command {
+            filtered = append(filtered, t)
+        }
+    }
+
+    return l.save(TemplateData{Templates: filtered})
+}
+
+func (l *Loader) save(data TemplateData) error {
+    raw, err := yaml.Marshal(data)
+    if err != nil {
+        return err
+    }
+    return os.WriteFile(l.templatePath, raw, 0644)
+}
+
+func truncateTemplateName(s string, max int) string {
+    if len(s) <= max {
+        return s
+    }
+    return s[:max-3] + "..."
+}
+
+func detectCategory(command string) string {
+    prefixes := map[string]string{
+        "git":      "git",
+        "docker":   "docker",
+        "kubectl":  "k8s",
+        "ssh":      "ssh",
+        "make":     "build",
+        "go":       "go",
+        "npm":      "node",
+        "yarn":     "node",
+        "systemctl":"system",
+        "brew":     "system",
+        "apt":      "system",
+    }
+    parts := strings.Fields(command)
+    if len(parts) == 0 {
+        return "other"
+    }
+    if cat, ok := prefixes[parts[0]]; ok {
+        return cat
+    }
+    return "other"
+}
+
 // createDefaultTemplates creates a default templates file
 func (l *Loader) createDefaultTemplates() error {
 	defaultTemplates := TemplateData{

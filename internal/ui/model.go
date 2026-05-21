@@ -24,6 +24,7 @@ type Model struct {
 	// Data
 	storage   storage.Storage
 	templates []templates.Template
+	templateLoader *templates.Loader
 	config    *config.Config
 
 	// Current state
@@ -31,6 +32,7 @@ type Model struct {
 	filteredCmds []history.Command // Filtered commands for display
 	mode         ViewMode
 	cursor       int
+	scrollOffset int
 	searchQuery  string
 
 	// UI state
@@ -44,15 +46,16 @@ type Model struct {
 }
 
 // NewModel creates a new TUI model
-func NewModel(store storage.Storage, templateList []templates.Template, cfg *config.Config) Model {
-	model := Model{
-		storage:   store,
-		templates: templateList,
-		config:    cfg,
-		mode:      HistoryMode,
-		cursor:    0,
-		width:     80,
-		height:    24,
+func NewModel(store storage.Storage, templateList []templates.Template, loader *templates.Loader, cfg *config.Config) Model {
+    model := Model{
+        storage:        store,
+        templates:      templateList,
+        templateLoader: loader,
+        config:         cfg,
+		mode:      		HistoryMode,
+		cursor:    		0,
+		width:     		80,
+		height:    		24,
 	}
 
 	// Load initial commands
@@ -89,9 +92,11 @@ func (m *Model) loadCommands() {
 	// Reset cursor if it's out of bounds
 	if m.cursor >= len(m.filteredCmds) && m.mode != TemplatesMode {
 		m.cursor = 0
+		m.scrollOffset = 0
 	}
 	if m.cursor >= len(m.templates) && m.mode == TemplatesMode {
 		m.cursor = 0
+		m.scrollOffset = 0
 	}
 }
 
@@ -116,24 +121,44 @@ func (m *Model) getCurrentItem() string {
 
 // moveUp moves the cursor up
 func (m *Model) moveUp() {
-	if m.cursor > 0 {
-		m.cursor--
-	}
+    if m.cursor > 0 {
+        m.cursor--
+    }
 }
 
-// moveDown moves the cursor down
 func (m *Model) moveDown() {
-	maxItems := 0
-	switch m.mode {
-	case HistoryMode, SearchMode:
-		maxItems = len(m.filteredCmds)
-	case TemplatesMode:
-		maxItems = len(m.templates)
-	}
+    maxItems := 0
+    switch m.mode {
+    case HistoryMode, SearchMode:
+        maxItems = len(m.filteredCmds)
+    case TemplatesMode:
+        maxItems = len(m.templates)
+    }
 
-	if m.cursor < maxItems-1 {
-		m.cursor++
-	}
+    if m.cursor < maxItems-1 {
+        m.cursor++
+    }
+}
+
+func (m *Model) adjustScrollOffset(itemHeights []int, visibleLines int) {
+    if len(itemHeights) == 0 {
+        m.scrollOffset = 0
+        return
+    }
+
+    half := visibleLines / 2
+
+    start := m.cursor
+    accumulated := 0
+    for i := m.cursor - 1; i >= 0; i-- {
+        if accumulated+itemHeights[i] > half {
+            break
+        }
+        accumulated += itemHeights[i]
+        start = i
+    }
+
+    m.scrollOffset = start
 }
 
 // setSearchQuery updates the search query and reloads commands
@@ -146,6 +171,7 @@ func (m *Model) setSearchQuery(query string) {
 func (m *Model) switchToHistoryMode() {
 	m.mode = HistoryMode
 	m.cursor = 0
+	m.scrollOffset = 0
 	m.searchQuery = ""
 	m.loadCommands()
 	m.statusMsg = "" // Clear status to show normal mode
@@ -155,6 +181,7 @@ func (m *Model) switchToHistoryMode() {
 func (m *Model) switchToTemplatesMode() {
 	m.mode = TemplatesMode
 	m.cursor = 0
+	m.scrollOffset = 0
 	m.statusMsg = ""
 }
 
@@ -162,6 +189,7 @@ func (m *Model) switchToTemplatesMode() {
 func (m *Model) switchToSearchMode() {
 	m.mode = SearchMode
 	m.cursor = 0
+	m.scrollOffset = 0
 	m.statusMsg = ""
 }
 
