@@ -7,7 +7,7 @@ import (
 	"github.com/4ndew/terminal-history-navigator/internal/history"
 )
 
-// Storage interface defines methods for storing and retrieving commands
+// Storage interface defines methods for storing and retrieving commands.
 type Storage interface {
 	Store(commands []history.Command)
 	Search(query string) []history.Command
@@ -16,165 +16,96 @@ type Storage interface {
 	GetAll() []history.Command
 }
 
-// MemoryStorage implements in-memory storage for commands
+// MemoryStorage implements in-memory storage for commands.
 type MemoryStorage struct {
 	commands []history.Command
-	indexed  map[string][]int // Maps words to command indices for fast search
 }
 
-// NewMemoryStorage creates a new in-memory storage instance
+// NewMemoryStorage creates a new in-memory storage instance.
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		commands: make([]history.Command, 0),
-		indexed:  make(map[string][]int),
 	}
 }
 
-// Store saves commands to memory and builds search index
+// Store saves commands to memory.
 func (s *MemoryStorage) Store(commands []history.Command) {
 	s.commands = commands
-	s.buildIndex()
 }
 
-// Search finds commands matching the query string with improved word matching
+// Search finds commands containing all query words as whole words or prefixes.
 func (s *MemoryStorage) Search(query string) []history.Command {
 	if query == "" {
-		return s.GetRecent(1000) // Return recent commands if no query
+		return s.GetRecent(1000)
 	}
 
-	query = strings.ToLower(query)
-	queryWords := strings.Fields(query)
+	queryWords := strings.Fields(strings.ToLower(query))
 
-	// Find commands that contain ALL query words as whole words or prefixes
 	var results []history.Command
-
 	for _, cmd := range s.commands {
-		cmdText := strings.ToLower(cmd.Text)
-
-		if s.commandMatchesQuery(cmdText, queryWords) {
+		if commandMatchesQuery(strings.ToLower(cmd.Text), queryWords) {
 			results = append(results, cmd)
 		}
 	}
 
-	// Sort by position (newest first - higher position = newer)
+	// Newest first.
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].Position > results[j].Position
+		return results[i].Timestamp > results[j].Timestamp
 	})
 
 	return results
 }
 
-// commandMatchesQuery checks if a command matches all query words
-func (s *MemoryStorage) commandMatchesQuery(cmdText string, queryWords []string) bool {
+// commandMatchesQuery checks if a command matches all query words.
+func commandMatchesQuery(cmdText string, queryWords []string) bool {
 	cmdWords := strings.Fields(cmdText)
-
-	// Check if command contains ALL query words
 	for _, queryWord := range queryWords {
-		if !s.commandContainsWord(cmdWords, queryWord) {
+		if !commandContainsWord(cmdWords, queryWord) {
 			return false
 		}
 	}
-
 	return true
 }
 
-// commandContainsWord checks if command contains a word as whole word or prefix
-func (s *MemoryStorage) commandContainsWord(cmdWords []string, queryWord string) bool {
+// commandContainsWord checks if command contains a word as whole word or prefix.
+func commandContainsWord(cmdWords []string, queryWord string) bool {
 	for _, cmdWord := range cmdWords {
-		// Clean command word of common shell characters
 		cleanCmdWord := cleanWord(cmdWord)
-		if cleanCmdWord == "" {
-			continue
+		if cleanCmdWord != "" {
+			if cleanCmdWord == queryWord || strings.HasPrefix(cleanCmdWord, queryWord) {
+				return true
+			}
 		}
-
-		// Check for exact match or prefix match
-		if cleanCmdWord == queryWord || strings.HasPrefix(cleanCmdWord, queryWord) {
-			return true
-		}
-
-		// Also check original word (before cleaning) for prefix match
 		if strings.HasPrefix(strings.ToLower(cmdWord), queryWord) {
 			return true
 		}
 	}
-
 	return false
 }
 
-// GetByFrequency returns commands sorted by usage frequency
+// GetByFrequency returns all commands sorted by real usage count,
+// then by recency for equal counts.
 func (s *MemoryStorage) GetByFrequency() []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
 
-	// Filter commands with count > 1 to show only frequently used ones
-	var frequentCommands []history.Command
-	for _, cmd := range commands {
-		if cmd.Count > 1 {
-			frequentCommands = append(frequentCommands, cmd)
+	sort.Slice(commands, func(i, j int) bool {
+		if commands[i].Count != commands[j].Count {
+			return commands[i].Count > commands[j].Count
 		}
-	}
-
-	// If no frequent commands, fallback to all commands sorted by simulated frequency
-	if len(frequentCommands) == 0 {
-		// Simulate frequency based on command characteristics
-		for i := range commands {
-			commands[i].Count = s.calculateSimulatedFrequency(commands[i])
-		}
-		frequentCommands = commands
-	}
-
-	// Sort by frequency (count) first, then by position (most recent first)
-	sort.Slice(frequentCommands, func(i, j int) bool {
-		// Primary sort by count (frequency) - higher count first
-		if frequentCommands[i].Count != frequentCommands[j].Count {
-			return frequentCommands[i].Count > frequentCommands[j].Count
-		}
-		// Secondary sort by position - higher position (more recent) first
-		return frequentCommands[i].Position > frequentCommands[j].Position
+		return commands[i].Timestamp > commands[j].Timestamp
 	})
 
-	return frequentCommands
+	return commands
 }
 
-// calculateSimulatedFrequency simulates frequency based on command patterns
-func (s *MemoryStorage) calculateSimulatedFrequency(cmd history.Command) int {
-	// Base frequency
-	freq := 1
-
-	// Boost common development commands
-	commonPatterns := []string{
-		"git", "make", "npm", "yarn", "docker", "cd", "ls", "vim", "code",
-		"python", "node", "go", "cargo", "mvn", "gradle", "pip", "brew",
-	}
-
-	for _, pattern := range commonPatterns {
-		if strings.Contains(strings.ToLower(cmd.Text), pattern) {
-			freq += 2
-			break
-		}
-	}
-
-	// Boost short, likely-repeated commands
-	if len(cmd.Text) < 10 {
-		freq += 1
-	}
-
-	// Commands that don't have parameters are likely used more often
-	if !strings.Contains(cmd.Text, " ") {
-		freq += 1
-	}
-
-	return freq
-}
-
-// GetRecent returns the most recently used commands (newest first)
+// GetRecent returns the most recently used commands (newest first).
 func (s *MemoryStorage) GetRecent(limit int) []history.Command {
 	commands := make([]history.Command, len(s.commands))
 	copy(commands, s.commands)
 
-	// Sort by position (highest position first - newest commands)
 	sort.Slice(commands, func(i, j int) bool {
-		return commands[i].Position > commands[j].Position
+		return commands[i].Timestamp > commands[j].Timestamp
 	})
 
 	if limit > 0 && limit < len(commands) {
@@ -184,77 +115,25 @@ func (s *MemoryStorage) GetRecent(limit int) []history.Command {
 	return commands
 }
 
-// GetAll returns all stored commands (sorted by position, newest first)
+// GetAll returns all stored commands (newest first).
 func (s *MemoryStorage) GetAll() []history.Command {
-	commands := make([]history.Command, len(s.commands))
-	copy(commands, s.commands)
-
-	// Sort by position (highest position first - newest commands)
-	sort.Slice(commands, func(i, j int) bool {
-		return commands[i].Position > commands[j].Position
-	})
-
-	return commands
+	return s.GetRecent(0)
 }
 
-// buildIndex creates a search index for fast text searching
-func (s *MemoryStorage) buildIndex() {
-	s.indexed = make(map[string][]int)
-
-	for i, cmd := range s.commands {
-		// Index individual words from the command
-		words := strings.Fields(strings.ToLower(cmd.Text))
-
-		for _, word := range words {
-			// Clean word of common shell characters
-			word = cleanWord(word)
-			if word == "" {
-				continue
-			}
-
-			if _, exists := s.indexed[word]; !exists {
-				s.indexed[word] = make([]int, 0)
-			}
-			s.indexed[word] = append(s.indexed[word], i)
-		}
-
-		// Also index command prefixes for partial matching (only first 10 chars)
-		cmdLower := strings.ToLower(cmd.Text)
-		for j := 1; j <= len(cmdLower) && j <= 10; j++ {
-			prefix := cmdLower[:j]
-			if _, exists := s.indexed[prefix]; !exists {
-				s.indexed[prefix] = make([]int, 0)
-			}
-			s.indexed[prefix] = append(s.indexed[prefix], i)
-		}
-	}
-}
-
-// cleanWord removes common shell characters from words
+// cleanWord removes common shell characters from words.
 func cleanWord(word string) string {
-	// Remove common shell characters
 	word = strings.Trim(word, "\"'`()[]{}|&;")
 	word = strings.TrimPrefix(word, "./")
 	word = strings.TrimPrefix(word, "../")
 
-	// Skip very short words and common shell operators
 	if len(word) < 2 {
 		return ""
 	}
 
-	// Skip common shell operators and flags
 	switch word {
 	case "&&", "||", ">>", "<<", "2>", "1>", "&>":
 		return ""
 	}
 
 	return word
-}
-
-// GetStats returns storage statistics
-func (s *MemoryStorage) GetStats() map[string]int {
-	return map[string]int{
-		"total_commands": len(s.commands),
-		"unique_words":   len(s.indexed),
-	}
 }

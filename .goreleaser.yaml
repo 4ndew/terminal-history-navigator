@@ -1,9 +1,13 @@
+version: 2
+
 project_name: terminal-history-navigator
 
 builds:
   - main: ./main.go
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w
     goos:
       - linux
       - windows
@@ -13,8 +17,11 @@ builds:
       - arm64
 
 archives:
-  - format: tar.gz
+  - formats: ['tar.gz']
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: ['zip']
 
 release:
   disable: false

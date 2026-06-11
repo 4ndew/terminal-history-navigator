@@ -8,42 +8,39 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// Command represents a shell command with metadata
+// Command represents a shell command with metadata.
 type Command struct {
 	Text      string
-	Position  int // Position in history file (higher = newer)
-	Directory string
+	Timestamp int64 // unix seconds; synthesized from file mtime when the source has no timestamps
 	Count     int
-	ExitCode  int  // Exit code if available
-	HasExit   bool // Whether exit code is available
 }
 
-// Reader handles reading command history from files
+// Reader handles reading command history from files.
 type Reader struct {
 	sources         []string
 	excludePatterns []*regexp.Regexp
-	maxLines        int // Maximum lines to read from each file
+	maxLines        int
 }
 
-// NewReader creates a new history reader with given sources
+// NewReader creates a new history reader with given sources.
 func NewReader(sources []string) *Reader {
 	return &Reader{
 		sources:  sources,
-		maxLines: 5000, // Default limit
+		maxLines: 5000,
 	}
 }
 
-// SetMaxLines sets the maximum number of lines to read from each file
+// SetMaxLines sets the maximum number of logical lines to keep from each file.
 func (r *Reader) SetMaxLines(maxLines int) {
 	r.maxLines = maxLines
 }
 
-// SetExcludePatterns sets regex patterns for commands to exclude
+// SetExcludePatterns sets regex patterns for commands to exclude.
 func (r *Reader) SetExcludePatterns(patterns []string) error {
 	r.excludePatterns = make([]*regexp.Regexp, 0, len(patterns))
-
 	for _, pattern := range patterns {
 		regex, err := regexp.Compile(pattern)
 		if err != nil {
@@ -51,110 +48,216 @@ func (r *Reader) SetExcludePatterns(patterns []string) error {
 		}
 		r.excludePatterns = append(r.excludePatterns, regex)
 	}
-
 	return nil
 }
 
-// ReadHistory reads command history from all configured sources
+// ReadHistory reads command history from all configured sources,
+// deduplicates commands, counts real frequency and sorts newest first.
 func (r *Reader) ReadHistory() ([]Command, error) {
-	var allCommands []Command
+	var all []Command
 
 	for _, source := range r.sources {
-		// Check if file exists
 		if _, err := os.Stat(source); os.IsNotExist(err) {
 			continue
 		}
-
 		commands, err := r.readFromFile(source)
 		if err != nil {
-			continue // Skip problematic files but don't fail completely
+			continue // skip problematic files but don't fail completely
 		}
-
-		allCommands = append(allCommands, commands...)
+		all = append(all, commands...)
 	}
 
-	// Filter out problematic commands before sorting
-	allCommands = r.filterProblematicCommands(allCommands)
-
-	// Sort all commands by position (newest first - higher position = newer)
-	sort.Slice(allCommands, func(i, j int) bool {
-		return allCommands[i].Position > allCommands[j].Position
-	})
-
-	// Deduplicate and count frequency
-	commandMap := make(map[string]int)
+	// Deduplicate: count real frequency, keep the newest timestamp per command.
+	index := make(map[string]int)
 	var result []Command
 
-	for _, cmd := range allCommands {
-	    if r.shouldExclude(cmd.Text) {
-	        continue
-	    }
-	    cleanText := strings.TrimSpace(cmd.Text)
-	    if cleanText == "" {
-	        continue
-	    }
+	for _, cmd := range all {
+		text := strings.TrimSpace(cmd.Text)
+		if text == "" || isProblematic(text) || r.shouldExclude(text) {
+			continue
+		}
 
-	    if idx, found := commandMap[cleanText]; found {
-	        result[idx].Count++
-	        if cmd.Position > result[idx].Position {
-	            result[idx].Position = cmd.Position
-	            result[idx].ExitCode = cmd.ExitCode
-	            result[idx].HasExit = cmd.HasExit
-	        }
-	    } else {
-	        newCmd := cmd
-	        newCmd.Text = cleanText
-	        newCmd.Count = 1
-	        commandMap[cleanText] = len(result) // индекс будущего элемента
-	        result = append(result, newCmd)
-	    }
+		if i, ok := index[text]; ok {
+			result[i].Count++
+			if cmd.Timestamp > result[i].Timestamp {
+				result[i].Timestamp = cmd.Timestamp
+			}
+		} else {
+			index[text] = len(result)
+			result = append(result, Command{
+				Text:      text,
+				Timestamp: cmd.Timestamp,
+				Count:     1,
+			})
+		}
 	}
 
-	// Re-sort result by position after deduplication (newest first)
+	// Newest first.
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].Position > result[j].Position
+		return result[i].Timestamp > result[j].Timestamp
 	})
 
 	return result, nil
 }
 
-// filterProblematicCommands removes commands that cause display issues
-func (r *Reader) filterProblematicCommands(commands []Command) []Command {
-	var filtered []Command
+// readFromFile reads commands from a specific history file.
+func (r *Reader) readFromFile(filename string) ([]Command, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 
-	for _, cmd := range commands {
-		// Skip commands that are clearly problematic
-		if r.isProblematicCommand(cmd) {
+	scanner := bufio.NewScanner(file)
+	// Default scanner limit is 64KB per line; one long line would
+	// otherwise abort reading the whole file.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var physical []string
+	for scanner.Scan() {
+		physical = append(physical, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	// Join backslash-continued lines into logical multiline commands.
+	logical := joinContinuations(physical)
+
+	// Keep only the last N logical lines (most recent commands).
+	if len(logical) > r.maxLines {
+		logical = logical[len(logical)-r.maxLines:]
+	}
+
+	isZsh := strings.Contains(filepath.Base(filename), "zsh")
+
+	var commands []Command
+	var pendingTS int64
+
+	for _, line := range logical {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			continue
 		}
-		filtered = append(filtered, cmd)
+
+		// bash with HISTTIMEFORMAT writes "#<unix-ts>" before each command.
+		if ts, ok := parseBashTimestamp(trimmed); ok {
+			pendingTS = ts
+			continue
+		}
+
+		var cmd Command
+		if isZsh || strings.HasPrefix(trimmed, ": ") {
+			cmd = parseZshLine(trimmed)
+		} else {
+			cmd = Command{Text: trimmed, Timestamp: pendingTS}
+		}
+		pendingTS = 0
+
+		if strings.TrimSpace(cmd.Text) != "" {
+			commands = append(commands, cmd)
+		}
 	}
 
-	return filtered
+	// Files (or entries) without timestamps get synthesized ones based on
+	// file mtime, so they can be merged and ordered with timestamped history.
+	fillMissingTimestamps(commands, fileMTime(filename))
+
+	return commands, nil
 }
 
-// isProblematicCommand checks if a command should be filtered out
-func (r *Reader) isProblematicCommand(cmd Command) bool {
-	// Filter out empty commands
-	cleanText := strings.TrimSpace(cmd.Text)
-	if len(cleanText) == 0 {
-		return true
+// joinContinuations merges physical lines ending with a backslash into one
+// logical line, preserving real newlines inside the command.
+// Limitation: a command whose stored form legitimately ends with a literal
+// backslash will be merged with the next line (heuristic).
+func joinContinuations(lines []string) []string {
+	var out []string
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		for strings.HasSuffix(line, "\\") && i+1 < len(lines) {
+			line = strings.TrimSuffix(line, "\\") + "\n" + lines[i+1]
+			i++
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+var bashTSPattern = regexp.MustCompile(`^#(\d+)$`)
+
+// parseBashTimestamp recognizes bash HISTTIMEFORMAT comment lines like "#1700000000".
+func parseBashTimestamp(line string) (int64, bool) {
+	m := bashTSPattern.FindStringSubmatch(line)
+	if m == nil {
+		return 0, false
+	}
+	ts, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || ts < 100000000 { // sanity check: must look like a unix timestamp
+		return 0, false
+	}
+	return ts, true
+}
+
+// parseZshLine parses a zsh history entry.
+// Extended format: ": <timestamp>:<elapsed>;command". The second field is the
+// command duration, NOT an exit code — zsh does not store exit codes.
+func parseZshLine(line string) Command {
+	if !strings.HasPrefix(line, ":") {
+		return Command{Text: line}
 	}
 
-	// Filter out commands with control characters
-	if strings.Contains(cleanText, "\x00") || strings.Contains(cleanText, "\xff") {
-		return true
+	semi := strings.Index(line, ";")
+	if semi == -1 || semi == len(line)-1 {
+		return Command{}
 	}
 
-	// Filter out commands that are just numbers
-	if isJustNumber(cleanText) {
-		return true
+	meta := strings.TrimPrefix(line[:semi], ":")
+	var ts int64
+	parts := strings.Split(meta, ":")
+	if len(parts) >= 1 {
+		if v, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64); err == nil && v > 0 {
+			ts = v
+		}
 	}
 
+	return Command{
+		Text:      strings.TrimSpace(line[semi+1:]),
+		Timestamp: ts,
+	}
+}
+
+// fillMissingTimestamps assigns approximate timestamps to entries that have
+// none: the last entry gets the file mtime, earlier entries step back 1s each.
+func fillMissingTimestamps(commands []Command, mtime int64) {
+	n := len(commands)
+	for i := range commands {
+		if commands[i].Timestamp == 0 {
+			commands[i].Timestamp = mtime - int64(n-1-i)
+		}
+	}
+}
+
+// fileMTime returns the file modification time in unix seconds,
+// falling back to now if stat fails.
+func fileMTime(filename string) int64 {
+	if fi, err := os.Stat(filename); err == nil {
+		return fi.ModTime().Unix()
+	}
+	return time.Now().Unix()
+}
+
+// isProblematic checks if a command should be filtered out.
+func isProblematic(text string) bool {
+	if strings.Contains(text, "\x00") || strings.Contains(text, "\xff") {
+		return true
+	}
+	if isJustNumber(text) {
+		return true
+	}
 	return false
 }
 
-// isJustNumber checks if a string contains only digits
+// isJustNumber checks if a string contains only digits.
 func isJustNumber(s string) bool {
 	if len(s) == 0 {
 		return false
@@ -167,116 +270,7 @@ func isJustNumber(s string) bool {
 	return true
 }
 
-// readFromFile reads commands from a specific history file
-func (r *Reader) readFromFile(filename string) ([]Command, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Read all lines
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	// Take only the last N lines (most recent commands)
-	maxLines := r.maxLines
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
-	}
-
-	// Parse lines based on file type
-	var commands []Command
-
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		var cmd Command
-		switch {
-		case strings.Contains(filename, "zsh"):
-			cmd = r.parseZshLine(line, i)
-		case strings.Contains(filename, "bash") || filepath.Ext(filename) == ".bash_history":
-			cmd = Command{
-				Text:     strings.TrimSpace(line),
-				Position: i, // Position in file
-			}
-		default:
-			// Try zsh format first, then fallback
-			if strings.HasPrefix(strings.TrimSpace(line), ":") {
-				cmd = r.parseZshLine(line, i)
-			} else {
-				cmd = Command{
-					Text:     strings.TrimSpace(line),
-					Position: i, // Position in file
-				}
-			}
-		}
-
-		if cmd.Text != "" {
-			commands = append(commands, cmd)
-		}
-	}
-
-	return commands, nil
-}
-
-// parseZshLine parses a single zsh history line
-func (r *Reader) parseZshLine(line string, lineNum int) Command {
-    line = strings.TrimSpace(line)
-
-    if !strings.HasPrefix(line, ":") {
-        if line != "" {
-            return Command{
-                Text:     line,
-                Position: lineNum,
-            }
-        }
-        return Command{Text: "", Position: lineNum}
-    }
-
-    semiIndex := strings.Index(line, ";")
-    if semiIndex == -1 || semiIndex == len(line)-1 {
-        return Command{Text: "", Position: lineNum}
-    }
-
-    metadataPart := line[1:semiIndex]
-    var exitCode int
-    var hasExit bool
-    position := lineNum
-
-    parts := strings.Split(metadataPart, ":")
-    if len(parts) >= 1 {
-        if ts, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64); err == nil && ts > 0 {
-            position = int(ts)
-        }
-    }
-    if len(parts) >= 3 && parts[2] != "" {
-        if code, err := strconv.Atoi(parts[2]); err == nil {
-            exitCode = code
-            hasExit = true
-        }
-    }
-
-    command := strings.TrimSpace(line[semiIndex+1:])
-
-    return Command{
-        Text:     command,
-        Position: position,
-        ExitCode: exitCode,
-        HasExit:  hasExit,
-    }
-}
-
-// shouldExclude checks if a command should be excluded based on patterns
+// shouldExclude checks if a command should be excluded based on patterns.
 func (r *Reader) shouldExclude(command string) bool {
 	for _, pattern := range r.excludePatterns {
 		if pattern.MatchString(command) {

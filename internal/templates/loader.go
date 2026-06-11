@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Template represents a command template with metadata
+// Template represents a command template with metadata.
 type Template struct {
 	Name        string `yaml:"name"`
 	Command     string `yaml:"command"`
@@ -17,48 +18,43 @@ type Template struct {
 	Category    string `yaml:"category"`
 }
 
-// TemplateData represents the structure of the templates YAML file
+// TemplateData represents the structure of the templates YAML file.
 type TemplateData struct {
 	Templates []Template `yaml:"templates"`
 }
 
-// Loader handles loading command templates from YAML files
+// Loader handles loading command templates from YAML files.
 type Loader struct {
 	templatePath string
 }
 
-// NewLoader creates a new template loader
+// NewLoader creates a new template loader.
 func NewLoader(templatePath string) *Loader {
 	return &Loader{
 		templatePath: templatePath,
 	}
 }
 
-// Load loads templates from the configured file
+// Load loads templates from the configured file.
 func (l *Loader) Load() ([]Template, error) {
-	// Check if file exists
 	if _, err := os.Stat(l.templatePath); os.IsNotExist(err) {
-		// Create default templates file
 		err := l.createDefaultTemplates()
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// Read the file
 	data, err := os.ReadFile(l.templatePath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse YAML
 	var templateData TemplateData
 	err = yaml.Unmarshal(data, &templateData)
 	if err != nil {
 		return nil, err
 	}
 
-	// Sort templates by category, then by name
 	sort.Slice(templateData.Templates, func(i, j int) bool {
 		if templateData.Templates[i].Category != templateData.Templates[j].Category {
 			return templateData.Templates[i].Category < templateData.Templates[j].Category
@@ -69,84 +65,91 @@ func (l *Loader) Load() ([]Template, error) {
 	return templateData.Templates, nil
 }
 
+// Add saves a command as a new template (no-op if it already exists).
 func (l *Loader) Add(command string) (Template, error) {
-    existing, err := l.Load()
-    if err != nil {
-        return Template{}, err
-    }
+	command = strings.TrimSpace(command)
 
-    for _, t := range existing {
-        if t.Command == command {
-            return t, nil // уже есть, не добавлять
-        }
-    }
+	existing, err := l.Load()
+	if err != nil {
+		return Template{}, err
+	}
 
-    t := Template{
-        Name:     truncateTemplateName(command, 40),
-        Command:  command,
-        Category: detectCategory(command),
-    }
+	for _, t := range existing {
+		if t.Command == command {
+			return t, nil // already exists, don't duplicate
+		}
+	}
 
-    data := TemplateData{Templates: append(existing, t)}
-    return t, l.save(data)
+	t := Template{
+		Name:     makeTemplateName(command, 40),
+		Command:  command,
+		Category: detectCategory(command),
+	}
+
+	data := TemplateData{Templates: append(existing, t)}
+	return t, l.save(data)
 }
 
+// Delete removes a template by its command.
 func (l *Loader) Delete(command string) error {
-    existing, err := l.Load()
-    if err != nil {
-        return err
-    }
+	existing, err := l.Load()
+	if err != nil {
+		return err
+	}
 
-    filtered := existing[:0]
-    for _, t := range existing {
-        if t.Command != command {
-            filtered = append(filtered, t)
-        }
-    }
+	filtered := existing[:0]
+	for _, t := range existing {
+		if t.Command != command {
+			filtered = append(filtered, t)
+		}
+	}
 
-    return l.save(TemplateData{Templates: filtered})
+	return l.save(TemplateData{Templates: filtered})
 }
 
 func (l *Loader) save(data TemplateData) error {
-    raw, err := yaml.Marshal(data)
-    if err != nil {
-        return err
-    }
-    return os.WriteFile(l.templatePath, raw, 0644)
+	raw, err := yaml.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(l.templatePath, raw, 0644)
 }
 
-func truncateTemplateName(s string, max int) string {
-    if len(s) <= max {
-        return s
-    }
-    return s[:max-3] + "..."
+// makeTemplateName builds a single-line, rune-safe truncated name.
+func makeTemplateName(s string, max int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max-3]) + "..."
 }
 
 func detectCategory(command string) string {
-    prefixes := map[string]string{
-        "git":      "git",
-        "docker":   "docker",
-        "kubectl":  "k8s",
-        "ssh":      "ssh",
-        "make":     "build",
-        "go":       "go",
-        "npm":      "node",
-        "yarn":     "node",
-        "systemctl":"system",
-        "brew":     "system",
-        "apt":      "system",
-    }
-    parts := strings.Fields(command)
-    if len(parts) == 0 {
-        return "other"
-    }
-    if cat, ok := prefixes[parts[0]]; ok {
-        return cat
-    }
-    return "other"
+	prefixes := map[string]string{
+		"git":       "git",
+		"docker":    "docker",
+		"kubectl":   "k8s",
+		"ssh":       "ssh",
+		"make":      "build",
+		"go":        "go",
+		"npm":       "node",
+		"yarn":      "node",
+		"systemctl": "system",
+		"brew":      "system",
+		"apt":       "system",
+	}
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return "other"
+	}
+	if cat, ok := prefixes[parts[0]]; ok {
+		return cat
+	}
+	return "other"
 }
 
-// createDefaultTemplates creates a default templates file
+// createDefaultTemplates creates a default templates file.
 func (l *Loader) createDefaultTemplates() error {
 	defaultTemplates := TemplateData{
 		Templates: []Template{
@@ -243,13 +246,11 @@ func (l *Loader) createDefaultTemplates() error {
 		},
 	}
 
-	// Create directory if it doesn't exist
 	err := os.MkdirAll(filepath.Dir(l.templatePath), 0755)
 	if err != nil {
 		return err
 	}
 
-	// Write templates to file
 	data, err := yaml.Marshal(defaultTemplates)
 	if err != nil {
 		return err
@@ -258,7 +259,7 @@ func (l *Loader) createDefaultTemplates() error {
 	return os.WriteFile(l.templatePath, data, 0644)
 }
 
-// GetByCategory returns templates grouped by category
+// GetByCategory returns templates grouped by category.
 func GetByCategory(templates []Template) map[string][]Template {
 	categories := make(map[string][]Template)
 
@@ -267,18 +268,13 @@ func GetByCategory(templates []Template) map[string][]Template {
 		if category == "" {
 			category = "other"
 		}
-
-		if _, exists := categories[category]; !exists {
-			categories[category] = make([]Template, 0)
-		}
-
 		categories[category] = append(categories[category], template)
 	}
 
 	return categories
 }
 
-// Search finds templates matching the query
+// Search finds templates matching the query.
 func Search(templates []Template, query string) []Template {
 	if query == "" {
 		return templates

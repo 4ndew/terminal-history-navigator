@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -14,21 +15,16 @@ var (
 	accentColor  = lipgloss.Color("#F59E0B")
 	mutedColor   = lipgloss.Color("#6B7280")
 	errorColor   = lipgloss.Color("#EF4444")
-	successColor = lipgloss.Color("#10B981")
-
-	// Base styles
-	baseStyle = lipgloss.NewStyle().
-			Padding(1, 2)
 
 	// Header styles
 	headerStyle = lipgloss.NewStyle().
 			Foreground(primaryColor).
 			Bold(true)
 
-	// Item styles - менее яркий цвет выделения
+	// Item styles
 	selectedItemStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(lipgloss.Color("#4A5568")). // Менее яркий серо-синий
+				Background(lipgloss.Color("#4A5568")).
 				Padding(0, 1)
 
 	normalItemStyle = lipgloss.NewStyle().
@@ -60,7 +56,7 @@ var (
 			Margin(1)
 )
 
-// View renders the TUI interface
+// View renders the TUI interface.
 func (m Model) View() string {
 	if m.showHelp {
 		return m.renderHelp()
@@ -68,21 +64,16 @@ func (m Model) View() string {
 
 	var sections []string
 
-	// Header - always show in all modes
 	sections = append(sections, m.renderHeader())
-	sections = append(sections, "") // Empty line for separation
-
-	// Main content
+	sections = append(sections, "")
 	sections = append(sections, m.renderMainContent())
-
-	// Footer
-	sections = append(sections, "") // Empty line before footer
+	sections = append(sections, "")
 	sections = append(sections, m.renderFooter())
 
 	return strings.Join(sections, "\n")
 }
 
-// renderHeader renders the application header - always visible in all modes
+// renderHeader renders the application header.
 func (m Model) renderHeader() string {
 	title := headerStyle.Render("Terminal History Navigator")
 
@@ -104,7 +95,8 @@ func (m Model) renderHeader() string {
 	return title + " " + modeDisplay
 }
 
-// renderMainContent renders the main content area with improved scrolling for multiline items
+// renderMainContent renders the main content area with scrolling support
+// for items that wrap onto multiple lines.
 func (m Model) renderMainContent() string {
 	items, selectedIndex := m.getVisibleItems()
 
@@ -112,25 +104,21 @@ func (m Model) renderMainContent() string {
 		return m.renderEmptyState()
 	}
 
-	// Calculate available space for items (subtract header, separators, footer)
 	maxVisibleLines := m.height - 6 // Header(1) + separator(1) + separator(1) + footer(3)
 	if maxVisibleLines < 3 {
 		maxVisibleLines = 3
 	}
 
-	// Pre-calculate how many lines each item will take
 	itemHeights := make([]int, len(items))
 	totalLines := 0
-
 	for i, item := range items {
-		height := m.calculateItemHeight(item, i == selectedIndex)
+		height := m.calculateItemHeight(item)
 		itemHeights[i] = height
 		totalLines += height
 	}
 
-	// If all items fit, show them all
 	if totalLines <= maxVisibleLines {
-	    return m.renderItemsRange(items, 0, len(items), selectedIndex, itemHeights)
+		return m.renderItemsRange(items, 0, len(items), selectedIndex)
 	}
 
 	m.adjustScrollOffset(itemHeights, maxVisibleLines)
@@ -138,89 +126,54 @@ func (m Model) renderMainContent() string {
 	lines := 0
 	end := m.scrollOffset
 	for i := m.scrollOffset; i < len(items); i++ {
-	    lines += itemHeights[i]
-	    if lines > maxVisibleLines {
-	        break
-	    }
-	    end = i + 1
+		lines += itemHeights[i]
+		if lines > maxVisibleLines {
+			break
+		}
+		end = i + 1
 	}
 
-	return m.renderItemsRange(items, m.scrollOffset, end, selectedIndex, itemHeights)
+	return m.renderItemsRange(items, m.scrollOffset, end, selectedIndex)
 }
 
-// calculateItemHeight calculates how many lines an item will occupy
-func (m Model) calculateItemHeight(item string, isSelected bool) int {
-	maxWidth := m.width - 6 // Account for selection markers and padding
+// calculateItemHeight calculates how many lines an item will occupy.
+// Counts runes; assumes one terminal cell per rune (wide CJK glyphs
+// may be slightly underestimated).
+func (m Model) calculateItemHeight(item string) int {
+	maxWidth := m.width - 6
 	if maxWidth < 20 {
 		maxWidth = 20
 	}
 
-	var prefix string
-	if isSelected {
-		prefix = "► "
-	} else {
-		prefix = "  "
-	}
-
-	// Add status indicator space (approximate)
-	statusIndicatorSpace := 2 // "✓ " or "✗ " or empty
-
-	availableForText := maxWidth - len(prefix) - statusIndicatorSpace
+	availableForText := maxWidth - 2 // prefix "► " / "  "
 	if availableForText < 10 {
 		availableForText = 10
 	}
 
-	// If it fits in one line
-	if len(item) <= availableForText {
+	if utf8.RuneCountInString(item) <= availableForText {
 		return 1
 	}
 
-	// Calculate wrapped lines
-	lines := wrapText(item, availableForText)
-	return len(lines)
+	return len(wrapText(item, availableForText))
 }
 
-// renderItemsRange renders items in the specified range with proper index mapping
-func (m Model) renderItemsRange(items []string, start, end, selectedIndex int, itemHeights []int) string {
+// renderItemsRange renders items in the specified range.
+func (m Model) renderItemsRange(items []string, start, end, selectedIndex int) string {
 	var renderedItems []string
 
 	for i := start; i < end && i < len(items); i++ {
-		item := items[i]
-		isSelected := (i == selectedIndex) // Используем глобальный индекс правильно
-
-		// Add status indicator for commands with exit codes
-		statusIndicator := ""
-		if m.mode == HistoryMode || m.mode == SearchMode {
-			if i < len(m.filteredCmds) {
-				cmd := m.filteredCmds[i]
-				if cmd.HasExit {
-					if cmd.ExitCode == 0 {
-						statusIndicator = lipgloss.NewStyle().Foreground(successColor).Render("✓ ")
-					} else {
-						statusIndicator = lipgloss.NewStyle().Foreground(errorColor).Render("✗ ")
-					}
-				}
-			}
-		}
-
-		// Render item
-		renderedItem := m.renderSingleItem(item, statusIndicator, isSelected)
-		renderedItems = append(renderedItems, renderedItem)
+		renderedItems = append(renderedItems, m.renderSingleItem(items[i], i == selectedIndex))
 	}
 
 	return strings.Join(renderedItems, "\n")
 }
 
-// renderSingleItem renders a single item with proper wrapping
-func (m Model) renderSingleItem(item string, statusIndicator string, isSelected bool) string {
-	// Calculate available width
-	maxWidth := m.width - 6 // Account for selection markers and padding
+// renderSingleItem renders a single item with proper wrapping.
+func (m Model) renderSingleItem(item string, isSelected bool) string {
+	maxWidth := m.width - 6
 	if maxWidth < 20 {
 		maxWidth = 20
 	}
-
-	// Prepare the full text with status indicator
-	fullText := statusIndicator + item
 
 	var prefix string
 	if isSelected {
@@ -229,86 +182,65 @@ func (m Model) renderSingleItem(item string, statusIndicator string, isSelected 
 		prefix = "  "
 	}
 
-	// If it fits in one line
-	if len(prefix+fullText) <= maxWidth {
-		var styledItem string
-		if isSelected {
-			styledItem = selectedItemStyle.Render(prefix + fullText)
-		} else {
-			styledItem = normalItemStyle.Render(prefix + fullText)
-		}
-		return styledItem
+	style := normalItemStyle
+	if isSelected {
+		style = selectedItemStyle
 	}
 
-	// Need to wrap
-	availableForText := maxWidth - len(prefix) - len(statusIndicator)
+	// Fits in one line.
+	if utf8.RuneCountInString(prefix+item) <= maxWidth {
+		return style.Render(prefix + item)
+	}
+
+	availableForText := maxWidth - 2
 	if availableForText < 10 {
 		availableForText = 10
 	}
 
 	lines := wrapText(item, availableForText)
 	var wrappedLines []string
-
 	for j, line := range lines {
-		var linePrefix string
-		var indicator string
-
+		linePrefix := "  "
 		if j == 0 {
-			// First line gets the selection marker and status
 			linePrefix = prefix
-			indicator = statusIndicator
-		} else {
-			// Continuation lines get padding
-			linePrefix = "  "
-			indicator = strings.Repeat(" ", len(statusIndicator))
 		}
-
-		var styledLine string
-		if isSelected {
-			styledLine = selectedItemStyle.Render(linePrefix + indicator + line)
-		} else {
-			styledLine = normalItemStyle.Render(linePrefix + indicator + line)
-		}
-		wrappedLines = append(wrappedLines, styledLine)
+		wrappedLines = append(wrappedLines, style.Render(linePrefix+line))
 	}
 
 	return strings.Join(wrappedLines, "\n")
 }
 
-// wrapText wraps text to specified width
+// wrapText wraps text to the specified width in runes (UTF-8 safe).
 func wrapText(text string, width int) []string {
-	if len(text) <= width {
+	runes := []rune(text)
+	if len(runes) <= width {
 		return []string{text}
 	}
 
 	var lines []string
-	remaining := text
-
-	for len(remaining) > 0 {
-		if len(remaining) <= width {
-			lines = append(lines, remaining)
+	for len(runes) > 0 {
+		if len(runes) <= width {
+			lines = append(lines, strings.TrimSpace(string(runes)))
 			break
 		}
 
-		// Find best break point
+		// Find best break point (prefer a space in the second half).
 		breakPoint := width
 		for i := width - 1; i >= width/2 && i > 0; i-- {
-			if i < len(remaining) && remaining[i] == ' ' {
+			if runes[i] == ' ' {
 				breakPoint = i
 				break
 			}
 		}
 
-		// Take the line and continue
-		line := strings.TrimSpace(remaining[:breakPoint])
-		lines = append(lines, line)
-		remaining = strings.TrimSpace(remaining[breakPoint:])
+		lines = append(lines, strings.TrimSpace(string(runes[:breakPoint])))
+		runes = []rune(strings.TrimSpace(string(runes[breakPoint:])))
 	}
 
 	return lines
 }
 
-// renderEmptyState renders the empty state message
+// renderEmptyState renders the empty state message.
 func (m Model) renderEmptyState() string {
 	var message string
 
@@ -328,26 +260,23 @@ func (m Model) renderEmptyState() string {
 	return lipgloss.NewStyle().Foreground(mutedColor).Render(message)
 }
 
-// renderFooter renders the footer with status and controls
+// renderFooter renders the footer with status and controls.
 func (m Model) renderFooter() string {
 	var sections []string
 
-	// Status or error message
 	if m.errorMsg != "" {
 		sections = append(sections, errorStyle.Render("Error: "+m.errorMsg))
 	} else if m.statusMsg != "" {
 		sections = append(sections, statusStyle.Render(m.statusMsg))
 	}
 
-	// Item count and position info
 	itemCount := m.getItemCount()
 	if itemCount > 0 {
 		position := fmt.Sprintf("%d/%d", m.cursor+1, itemCount)
 
-		// Add sorting info
 		var sortInfo string
 		if m.mode == HistoryMode {
-			if m.statusMsg == "Sorted by frequency" {
+			if m.sortByFreq {
 				sortInfo = " (by frequency)"
 			} else {
 				sortInfo = " (newest first)"
@@ -357,27 +286,25 @@ func (m Model) renderFooter() string {
 		sections = append(sections, lipgloss.NewStyle().Foreground(mutedColor).Render(position+sortInfo))
 	}
 
-	// Controls help
 	controls := m.getControlsHelp()
 	sections = append(sections, footerStyle.Render(controls))
 
-	// Join sections and wrap if necessary
 	footer := strings.Join(sections, " | ")
 	return m.wrapFooter(footer)
 }
 
-// wrapFooter wraps the footer text if it exceeds screen width
+// wrapFooter wraps the footer text if it exceeds screen width.
+// Uses lipgloss.Width to measure visible width (ignores ANSI codes).
 func (m Model) wrapFooter(footer string) string {
 	maxWidth := m.width - 4
 	if maxWidth < 20 {
 		maxWidth = 20
 	}
 
-	if len(footer) <= maxWidth {
+	if lipgloss.Width(footer) <= maxWidth {
 		return footer
 	}
 
-	// Split and wrap footer
 	parts := strings.Split(footer, " | ")
 	var lines []string
 	var currentLine string
@@ -389,7 +316,7 @@ func (m Model) wrapFooter(footer string) string {
 		}
 		testLine += part
 
-		if len(testLine) <= maxWidth {
+		if lipgloss.Width(testLine) <= maxWidth {
 			currentLine = testLine
 		} else {
 			if currentLine != "" {
@@ -406,38 +333,39 @@ func (m Model) wrapFooter(footer string) string {
 	return strings.Join(lines, "\n")
 }
 
-// getControlsHelp returns context-appropriate control hints
+// getControlsHelp returns context-appropriate control hints.
 func (m Model) getControlsHelp() string {
 	switch m.mode {
 	case SearchMode:
 		return "esc: exit | enter: copy | ↑↓: navigate"
 	case TemplatesMode:
-	    return "enter: copy | d: delete | t: history | /: search | ?: help | q: quit"
+		return "enter: copy | d: delete | t: history | /: search | ?: help | q: quit"
 	default:
-	    return "enter: copy | s: save as template | t: templates | /: search | f: freq | ?: help | q: quit"
+		return "enter: copy | s: save as template | t: templates | /: search | f: freq | ?: help | q: quit"
 	}
 }
 
-// renderHelp renders the help screen
+// renderHelp renders the help screen.
 func (m Model) renderHelp() string {
 	helpText := `Terminal History Navigator - Help
 
 NAVIGATION:
   ↑/k         Move up
   ↓/j         Move down
+  mouse wheel Scroll list
   enter       Copy selected item to clipboard
-  
+
 MODES:
   h           Switch to history mode
   t           Toggle templates mode
   /           Start search
-  f           Sort by frequency (history mode)
-  
+  f           Toggle frequency / chronological sort (history mode)
+
 SEARCH:
   /           Enter search mode
   esc         Exit search mode
   backspace   Delete search character
-  
+
 OTHER:
   ?           Toggle this help
   esc         Clear messages / close help
