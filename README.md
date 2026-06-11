@@ -5,13 +5,15 @@ TUI application for browsing shell command history on macOS and Linux.
 ## Features
 
 - Browse commands from zsh/bash history files
-- Chronological ordering based on actual timestamps (zsh extended history)
-- Accurate frequency tracking across sessions
-- Search with whole-word and prefix matching
+- Chronological ordering based on actual timestamps (zsh `extended_history`, bash `HISTTIMEFORMAT`)
+- Files without timestamps are merged using approximate times derived from file modification time
+- Multiline commands (backslash continuations) are kept as single entries and copied with line breaks preserved
+- Accurate frequency tracking across sessions (real usage counts, no heuristics)
+- Search with whole-word and prefix matching, Unicode-aware
 - Command templates with categories — add any command with one key, delete with one key
 - Copy commands to clipboard
-- Frequency and chronological sorting
-- Exit code indicators (✓ / ✗) for zsh extended history
+- Frequency / chronological sorting toggle
+- Mouse wheel scrolling
 - Centered cursor scrolling
 
 ## Requirements
@@ -22,10 +24,21 @@ TUI application for browsing shell command history on macOS and Linux.
 
 ## Installation
 
+### From source
+
 ```bash
 git clone https://github.com/4ndew/terminal-history-navigator
 cd terminal-history-navigator
 make install
+```
+
+### From GitHub Releases
+
+Download the archive for your OS/arch from the Releases page, unpack and put the binary into your `PATH`:
+
+```bash
+tar -xzf terminal-history-navigator_<os>_<arch>.tar.gz
+sudo mv terminal-history-navigator /usr/local/bin/
 ```
 
 Add alias to shell config:
@@ -51,6 +64,7 @@ terminal-history-navigator
 |-----|--------|
 | `↑` / `k` | Move up |
 | `↓` / `j` | Move down |
+| Mouse wheel | Scroll list |
 | `Enter` | Copy selected command to clipboard |
 | `q` / `Ctrl+C` | Quit |
 
@@ -103,7 +117,7 @@ exclude_patterns:
   - "secret"
   - "^exit$"
   - "^clear$"
-  - "^\d+$"
+  - "^\\d+$"
 ui:
   max_items: 1000
   show_timestamps: true
@@ -111,6 +125,9 @@ ui:
 performance:
   max_history_lines: 10000
 ```
+
+Note: exclude patterns are regular expressions. Anchor them (`^...$`) when you
+mean an exact command, otherwise the pattern matches as a substring.
 
 ### Templates — `~/.config/history-nav/templates.yaml`
 
@@ -126,7 +143,7 @@ Templates can be managed directly from the TUI — no manual editing required.
 
 ## Recommended Shell Settings
 
-For accurate timestamps and exit code tracking, add to `~/.zshrc`:
+### zsh — add to `~/.zshrc`:
 
 ```bash
 # Write timestamp and duration to each history entry
@@ -137,7 +154,20 @@ setopt inc_append_history
 setopt share_history
 ```
 
-Without `extended_history`, commands are ordered by line number in the history file rather than by actual time. With it, ordering is based on unix timestamps and is accurate across multiple files and sessions.
+### bash — add to `~/.bashrc`:
+
+```bash
+# Store timestamps in history
+export HISTTIMEFORMAT="%F %T "
+
+# Append to history file on each command
+shopt -s histappend
+export PROMPT_COMMAND="history -a; $PROMPT_COMMAND"
+```
+
+Without timestamps, command order is approximated from the history file's
+modification time and line order. With timestamps, ordering is exact across
+multiple files and sessions.
 
 ## Troubleshooting
 
@@ -162,9 +192,10 @@ setopt inc_append_history
 setopt share_history
 ```
 
-**Exit code indicators not showing**
+**Ordering looks wrong when mixing zsh and bash history**
 
-Requires `setopt extended_history` in `~/.zshrc`. Indicators show ✓ for exit code 0 and ✗ for anything else.
+Enable timestamps in both shells (see Recommended Shell Settings). Entries
+without timestamps can only be ordered approximately.
 
 **Clipboard not working on Linux**
 
@@ -181,6 +212,19 @@ brew install xclip       # Homebrew on Linux
 make build    # Build binary to bin/
 make run      # Build and run
 make clean    # Remove build artifacts
+```
+
+## Releases
+
+Binaries are built by GoReleaser in CI:
+
+- every push to `main` produces snapshot binaries (Actions → Artifacts)
+- pushing a tag `v*` publishes a GitHub Release with archives for
+  linux/darwin/windows × amd64/arm64
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 ## Manual Installation

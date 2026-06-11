@@ -7,25 +7,23 @@ sources:
 
 # Patterns to exclude from history (regex)
 exclude_patterns:
-  - "^sudo su"          # sudo su commands (but not all sudo)  
+  - "^sudo su"          # sudo su commands (but not all sudo)
   - "password"
   - "token"
   - "secret"
-  - "key.*="           # environment variables with keys
+  - "key.*="            # environment variables with keys
   - "^history"
   - "^exit$"
   - "^clear$"
   - "^pwd$"
-  - "^\\.$"
-  - "^\\.\\.+$"
-  - "^\\d+$"              # Just numbers
-  - "^[[:space:]]*$"     # Just whitespace
-  - "h$"
+  - "^\\.\\.*$"         # ".", "..", "..." etc.
+  - "^\\d+$"            # just numbers
+  - "^[[:space:]]*$"    # just whitespace
+  - "^h$"               # the alias itself (anchored: only exactly "h")
 
 # UI settings
 ui:
   max_items: 1000
-  theme: "dark"
   show_timestamps: true
   show_frequency: true
 
